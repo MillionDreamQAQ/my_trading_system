@@ -1,0 +1,54 @@
+[instrument]
+symbol = "XAU_USD"
+provider = "oanda"
+price_basis = "mid"
+timezone = "UTC"
+venue = "OANDA spot/CFD"
+contract_unit = "1 troy ounce"
+quote_currency = "USD"
+tick_size = 0.01
+point_value = 1.0
+
+[timeframes]
+base = "15min"
+medium = "1h"
+large = "4h"
+timezone = "UTC"
+
+[strategy]
+direction = "both"
+version = "baseline-v1"
+
+[trend]
+ema_fast = 20
+ema_slow = 60
+slope_lookback = 5
+
+[entry_point_2]
+enabled = true
+breakout_lookback = 20
+
+[entry_point_3]
+enabled = true
+pullback_min_atr = 0.5
+pullback_min_bars = 2
+max_setup_bars = 30
+
+[risk]
+atr_period = 14
+stop_atr = 2.0
+target_atr = 4.0
+max_hold_bars = 80
+
+[costs]
+spread_model = "fixed"
+spread_value = 0.0
+slippage_model = "fixed"
+slippage_value = 0.0
+commission_per_unit = 0.0
+require_explicit_costs = true
+
+[data_quality]
+missing_bar_policy = "warn"
+max_gap_bars = 16
+closed_weekdays = [5, 6]
