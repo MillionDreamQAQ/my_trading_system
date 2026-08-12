@@ -68,10 +68,17 @@ class EntryPoint2Tests(unittest.TestCase):
         self.assertEqual(signals[0].side, Direction.LONG)
         self.assertEqual(signals[0].signal_time, context.loc[4, "signal_time"])
         self.assertEqual(signals[0].entry_time, context.loc[5, "open_time"])
-        self.assertEqual(signals[0].reason, "fresh_close_breakout_above_20_bar_high")
+        self.assertEqual(signals[0].reason, "fresh_close_breakout_above_3_bar_high")
 
     def test_staying_above_breakout_does_not_repeat(self) -> None:
         context = _context([100, 100, 100, 100, 101.0, 101.2, 101.4, 101.6])
+
+        signals = detect_entry_point_2(context, _config())
+
+        self.assertEqual(len(signals), 1)
+
+    def test_monotonic_new_highs_do_not_emit_a_signal_on_every_bar(self) -> None:
+        context = _context([100, 100, 100, 100, 101, 102, 103, 104, 105])
 
         signals = detect_entry_point_2(context, _config())
 

@@ -25,6 +25,14 @@ def _trend_ok(row: pd.Series, side: Direction) -> bool:
     return bool(row["all_up"] if side is Direction.LONG else row["all_down"])
 
 
+def _has_data_gap(frame: pd.DataFrame, index: int, base_timeframe: str) -> bool:
+    if index == 0:
+        return False
+    previous = pd.Timestamp(frame.iloc[index - 1]["open_time"])
+    current = pd.Timestamp(frame.iloc[index]["open_time"])
+    return current - previous > pd.Timedelta(base_timeframe)
+
+
 def _initial_breakout(
     frame: pd.DataFrame,
     index: int,
@@ -35,9 +43,14 @@ def _initial_breakout(
     if not _trend_ok(row, side) or pd.isna(row[level_column]):
         return False
     previous_close = frame.iloc[index - 1]["close"] if index > 0 else None
+    previous_level = frame.iloc[index - 1][level_column] if index > 0 else None
     if side is Direction.LONG:
-        return row["close"] > row[level_column] and (previous_close is None or previous_close <= row[level_column])
-    return row["close"] < row[level_column] and (previous_close is None or previous_close >= row[level_column])
+        return row["close"] > row[level_column] and (
+            previous_close is None or pd.isna(previous_level) or previous_close <= previous_level
+        )
+    return row["close"] < row[level_column] and (
+        previous_close is None or pd.isna(previous_level) or previous_close >= previous_level
+    )
 
 
 def _make_signal(
@@ -92,6 +105,11 @@ def detect_entry_point_3(context: pd.DataFrame, config: ResearchConfig) -> Entry
                 continue
             setup = active[side]
             if setup is not None:
+                if _has_data_gap(frame, index, config.timeframes.base):
+                    setup.cancel(index, "data_gap")
+                    completed.append(setup)
+                    active[side] = None
+                    continue
                 setup.age_bars += 1
                 if setup.age_bars > config.entry_point_3.max_setup_bars:
                     setup.cancel(index, "max_setup_bars_exceeded")
@@ -188,4 +206,3 @@ def detect_entry_point_3(context: pd.DataFrame, config: ResearchConfig) -> Entry
             setup.cancel(len(frame), "data_ended_before_setup_completion")
             completed.append(setup)
     return EntryPoint3Result(tuple(signals), tuple(completed))
-

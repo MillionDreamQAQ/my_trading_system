@@ -25,7 +25,7 @@ class ResamplingTests(unittest.TestCase):
             frame,
             InstrumentMetadata(
                 provider="test-provider",
-                symbol="GC=F",
+                symbol="XAU_USD",
                 price_basis=PriceBasis.MID,
                 source_interval="15min",
             ),
@@ -65,4 +65,3 @@ class ResamplingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

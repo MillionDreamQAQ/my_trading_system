@@ -72,6 +72,15 @@ class EntryPoint3Tests(unittest.TestCase):
         self.assertEqual(result.signals, ())
         self.assertEqual(result.setups[0].cancel_reason, "close_below_initial_breakout")
 
+    def test_data_gap_cancels_an_active_setup(self) -> None:
+        context = _context([100, 100, 100, 100, 101, 103, 101.8, 101.5, 102.5])
+        context.loc[6:, ["open_time", "close_time", "signal_time"]] += pd.Timedelta(hours=1)
+
+        result = detect_entry_point_3(context, _config())
+
+        self.assertEqual(result.signals, ())
+        self.assertIn("data_gap", [setup.cancel_reason for setup in result.setups])
+
     def test_short_is_mirror(self) -> None:
         context = _context([100, 100, 100, 100, 99, 97, 98.2, 98.5, 97.5, 96.5, 96])
         context["all_up"] = False

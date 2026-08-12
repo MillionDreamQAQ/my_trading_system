@@ -13,8 +13,10 @@ dependencies = [
   "requests>=2.28",
 ]
 
+[project.scripts]
+gold-research = "gold_research.cli:main"
+
 [project.optional-dependencies]
-parquet = ["pyarrow>=12"]
 test = ["pytest>=7"]
 
 [tool.setuptools.packages.find]
@@ -23,4 +25,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-

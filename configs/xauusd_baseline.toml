@@ -1,9 +1,9 @@
 [instrument]
-symbol = "XAUUSD"
-provider = "replace-with-provider"
+symbol = "XAU_USD"
+provider = "oanda"
 price_basis = "mid"
 timezone = "UTC"
-venue = "spot-cfd"
+venue = "OANDA spot/CFD"
 contract_unit = "1 troy ounce"
 quote_currency = "USD"
 tick_size = 0.01
@@ -49,7 +49,6 @@ commission_per_unit = 0.0
 require_explicit_costs = true
 
 [data_quality]
-missing_bar_policy = "block"
-max_gap_bars = 0
+missing_bar_policy = "warn"
+max_gap_bars = 16
 closed_weekdays = [5, 6]
-

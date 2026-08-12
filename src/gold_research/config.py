@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -29,14 +30,41 @@ def _positive_int(value: Any, name: str) -> int:
 
 
 def _positive_float(value: Any, name: str, allow_zero: bool = False) -> float:
+    if isinstance(value, bool):
+        raise ConfigError(f"{name} must be a number")
     try:
         result = float(value)
     except (TypeError, ValueError) as exc:
         raise ConfigError(f"{name} must be a number") from exc
+    if not math.isfinite(result):
+        raise ConfigError(f"{name} must be finite")
     if result < 0 or (result == 0 and not allow_zero):
         comparator = "non-negative" if allow_zero else "positive"
         raise ConfigError(f"{name} must be {comparator}")
     return result
+
+
+def _nonnegative_int(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(f"{name} must be a non-negative integer")
+    return value
+
+
+def _boolean(value: Any, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(f"{name} must be a boolean")
+    return value
+
+
+def _closed_weekdays(value: Any) -> tuple[int, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ConfigError("data_quality.closed_weekdays must be an array")
+    result: list[int] = []
+    for day in value:
+        if isinstance(day, bool) or not isinstance(day, int) or not 0 <= day <= 6:
+            raise ConfigError("data_quality.closed_weekdays must contain weekday numbers 0..6")
+        result.append(day)
+    return tuple(result)
 
 
 @dataclass(frozen=True)
@@ -175,6 +203,10 @@ class ResearchConfig:
         )
         for field in cost_fields:
             _required(costs, field, "costs")
+        if str(costs["spread_model"]).lower() != "fixed":
+            raise ConfigError("costs.spread_model must be fixed")
+        if str(costs["slippage_model"]).lower() != "fixed":
+            raise ConfigError("costs.slippage_model must be fixed")
 
         direction_value = str(raw.get("strategy", {}).get("direction", "both")).lower()
         try:
@@ -201,14 +233,14 @@ class ResearchConfig:
             timeframes=TimeframeConfig(tf_base, tf_medium, tf_large, tf_timezone),
             trend=trend_config,
             entry_point_2=EntryPoint2Config(
-                enabled=bool(_required(entry2, "enabled", "entry_point_2")),
+                enabled=_boolean(_required(entry2, "enabled", "entry_point_2"), "entry_point_2.enabled"),
                 breakout_lookback=_positive_int(
                     _required(entry2, "breakout_lookback", "entry_point_2"),
                     "entry_point_2.breakout_lookback",
                 ),
             ),
             entry_point_3=EntryPoint3Config(
-                enabled=bool(_required(entry3, "enabled", "entry_point_3")),
+                enabled=_boolean(_required(entry3, "enabled", "entry_point_3"), "entry_point_3.enabled"),
                 pullback_min_atr=_positive_float(
                     _required(entry3, "pullback_min_atr", "entry_point_3"),
                     "entry_point_3.pullback_min_atr",
@@ -236,12 +268,14 @@ class ResearchConfig:
                 commission_per_unit=_positive_float(
                     costs["commission_per_unit"], "costs.commission_per_unit", allow_zero=True
                 ),
-                require_explicit_costs=bool(costs["require_explicit_costs"]),
+                require_explicit_costs=_boolean(costs["require_explicit_costs"], "costs.require_explicit_costs"),
             ),
             data_quality=DataQualityConfig(
                 missing_bar_policy=str(_required(quality, "missing_bar_policy", "data_quality")),
-                max_gap_bars=int(_required(quality, "max_gap_bars", "data_quality")),
-                closed_weekdays=tuple(int(day) for day in quality.get("closed_weekdays", [])),
+                max_gap_bars=_nonnegative_int(
+                    _required(quality, "max_gap_bars", "data_quality"), "data_quality.max_gap_bars"
+                ),
+                closed_weekdays=_closed_weekdays(quality.get("closed_weekdays", [])),
             ),
             direction=direction,
             strategy_version=str(raw.get("strategy", {}).get("version", "baseline-v1")),
@@ -278,5 +312,28 @@ def load_config(path: str | Path) -> ResearchConfig:
         raise ConfigError(f"config file not found: {config_path}") from exc
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid TOML config: {config_path}: {exc}") from exc
-    return ResearchConfig.from_mapping(raw)
+    config = ResearchConfig.from_mapping(raw)
+    validate_oanda_xauusd_config(config)
+    return config
 
+
+def validate_oanda_xauusd_config(config: ResearchConfig) -> None:
+    """Reject user-facing configurations outside the supported OANDA contract."""
+
+    instrument = config.instrument
+    if instrument.provider.strip().lower() != "oanda":
+        raise ConfigError("instrument.provider must be oanda in this OANDA-only research system")
+    if instrument.symbol.strip().upper() != "XAU_USD":
+        raise ConfigError("instrument.symbol must be XAU_USD in this OANDA-only research system")
+    if instrument.timezone.upper() != "UTC":
+        raise ConfigError("instrument.timezone must be UTC for OANDA historical research")
+    if instrument.venue != "OANDA spot/CFD":
+        raise ConfigError("instrument.venue must be OANDA spot/CFD")
+    if instrument.contract_unit != "1 troy ounce":
+        raise ConfigError("instrument.contract_unit must be 1 troy ounce")
+    if instrument.quote_currency.upper() != "USD":
+        raise ConfigError("instrument.quote_currency must be USD")
+    if instrument.tick_size != 0.01:
+        raise ConfigError("instrument.tick_size must be 0.01")
+    if instrument.point_value != 1.0:
+        raise ConfigError("instrument.point_value must be 1.0")

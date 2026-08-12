@@ -13,6 +13,7 @@ def _signal_from_row(
     side: Direction,
     breakout_level: float,
     entry_time: pd.Timestamp | None,
+    lookback: int,
 ) -> Signal:
     return Signal(
         strategy_id="entry_point_2",
@@ -21,9 +22,9 @@ def _signal_from_row(
         entry_time=entry_time,
         breakout_level=float(breakout_level),
         atr=None if pd.isna(row.get("atr")) else float(row["atr"]),
-        reason="fresh_close_breakout_above_20_bar_high"
+        reason=f"fresh_close_breakout_above_{lookback}_bar_high"
         if side is Direction.LONG
-        else "fresh_close_breakout_below_20_bar_low",
+        else f"fresh_close_breakout_below_{lookback}_bar_low",
         base_trend=str(row["base_trend"]),
         medium_trend=str(row["medium_trend"]),
         large_trend=str(row["large_trend"]),
@@ -45,8 +46,6 @@ def detect_entry_point_2(context: pd.DataFrame, config: ResearchConfig) -> list[
     frame = context.copy().reset_index(drop=True)
     frame["long_level"] = frame["high"].shift(1).rolling(lookback, min_periods=lookback).max()
     frame["short_level"] = frame["low"].shift(1).rolling(lookback, min_periods=lookback).min()
-    frame["previous_long_level"] = frame["long_level"].shift(1)
-    frame["previous_short_level"] = frame["short_level"].shift(1)
     signals: list[Signal] = []
     for index, row in frame.iterrows():
         next_entry = None
@@ -55,16 +54,22 @@ def detect_entry_point_2(context: pd.DataFrame, config: ResearchConfig) -> list[
         long_allowed = config.direction in {Direction.LONG, Direction.BOTH}
         short_allowed = config.direction in {Direction.SHORT, Direction.BOTH}
         previous_close = frame.loc[index - 1, "close"] if index > 0 else None
+        previous_long_level = frame.loc[index - 1, "long_level"] if index > 0 else None
+        previous_short_level = frame.loc[index - 1, "short_level"] if index > 0 else None
         if long_allowed and bool(row["all_up"]) and pd.notna(row["long_level"]):
             fresh = row["close"] > row["long_level"] and (
-                previous_close is None or previous_close <= row["long_level"]
+                previous_close is None
+                or pd.isna(previous_long_level)
+                or previous_close <= previous_long_level
             )
             if fresh:
-                signals.append(_signal_from_row(row, Direction.LONG, row["long_level"], next_entry))
+                signals.append(_signal_from_row(row, Direction.LONG, row["long_level"], next_entry, lookback))
         if short_allowed and bool(row["all_down"]) and pd.notna(row["short_level"]):
             fresh = row["close"] < row["short_level"] and (
-                previous_close is None or previous_close >= row["short_level"]
+                previous_close is None
+                or pd.isna(previous_short_level)
+                or previous_close >= previous_short_level
             )
             if fresh:
-                signals.append(_signal_from_row(row, Direction.SHORT, row["short_level"], next_entry))
+                signals.append(_signal_from_row(row, Direction.SHORT, row["short_level"], next_entry, lookback))
     return signals

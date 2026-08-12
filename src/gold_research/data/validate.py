@@ -20,6 +20,23 @@ class DataValidationError(ValueError):
         return "; ".join(f"{issue.code}: {issue.message}" for issue in self.issues)
 
 
+def fatal_data_issues(
+    issues: list[DataQualityIssue],
+    missing_bar_policy: str,
+    max_gap_bars: int,
+) -> list[DataQualityIssue]:
+    """Apply the configured gap policy without hiding other quality errors."""
+
+    if missing_bar_policy == "block":
+        return list(issues)
+    return [
+        issue
+        for issue in issues
+        if issue.code != "MISSING_BARS"
+        or missing_bar_policy == "warn" and issue.count > max_gap_bars
+    ]
+
+
 def _issue(code: str, message: str, **kwargs: object) -> DataQualityIssue:
     return DataQualityIssue(code=code, severity="error", message=message, **kwargs)
 

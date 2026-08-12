@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -166,6 +166,8 @@ class RunManifest:
     timezone: str
     cost_model: dict[str, Any]
     warnings: tuple[dict[str, Any], ...] = ()
+    source_metadata: dict[str, Any] = field(default_factory=dict)
+    research_usable: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
