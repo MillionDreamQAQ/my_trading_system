@@ -14,7 +14,7 @@ from .backtest.execution import BacktestResult, run_backtest
 from .backtest.metrics import summarize_trades
 from .config import ResearchConfig, validate_oanda_xauusd_config
 from .data.resample import resample_bars
-from .data.validate import DataValidationError, fatal_data_issues, validate_bar_series
+from .data.validate import DataValidationError, validate_bar_series
 from .domain import BarSeries, DataQualityIssue, RunManifest, Signal
 from .strategy.entry_point_2 import detect_entry_point_2
 from .strategy.entry_point_3 import EntryPoint3Result, detect_entry_point_3
@@ -62,7 +62,13 @@ def fingerprint_bars(series: BarSeries) -> str:
     return digest.hexdigest()
 
 
-def _stable_run_id(strategy_id: str, config: ResearchConfig, data_fingerprint: str, code_fingerprint: str, base: BarSeries) -> str:
+def _stable_run_id(
+    strategy_id: str,
+    config: ResearchConfig,
+    data_fingerprint: str,
+    code_fingerprint: str,
+    base: BarSeries,
+) -> str:
     payload = json.dumps(
         {
             "strategy": strategy_id,
@@ -166,18 +172,11 @@ def run_research(
     issues = validate_bar_series(
         base,
         expected_interval=config.timeframes.base,
-        closed_weekdays=config.data_quality.closed_weekdays,
-        market_calendar=config.data_quality.market_calendar,
         raise_on_error=False,
     )
     base.quality_issues.extend(issue for issue in issues if issue not in base.quality_issues)
-    fatal = fatal_data_issues(
-        issues,
-        config.data_quality.missing_bar_policy,
-        config.data_quality.max_gap_bars,
-    )
-    if fatal:
-        raise DataValidationError(fatal)
+    if issues:
+        raise DataValidationError(issues)
     medium = resample_bars(base, config.timeframes.medium)
     large = resample_bars(base, config.timeframes.large)
     context = build_timeframe_context(

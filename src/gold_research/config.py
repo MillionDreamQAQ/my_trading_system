@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from .domain import Direction, PriceBasis
-from .market_calendar import NO_MARKET_CALENDAR, SUPPORTED_MARKET_CALENDARS
 
 
 class ConfigError(ValueError):
@@ -45,35 +44,10 @@ def _positive_float(value: Any, name: str, allow_zero: bool = False) -> float:
     return result
 
 
-def _nonnegative_int(value: Any, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ConfigError(f"{name} must be a non-negative integer")
-    return value
-
-
 def _boolean(value: Any, name: str) -> bool:
     if not isinstance(value, bool):
         raise ConfigError(f"{name} must be a boolean")
     return value
-
-
-def _closed_weekdays(value: Any) -> tuple[int, ...]:
-    if not isinstance(value, (list, tuple)):
-        raise ConfigError("data_quality.closed_weekdays must be an array")
-    result: list[int] = []
-    for day in value:
-        if isinstance(day, bool) or not isinstance(day, int) or not 0 <= day <= 6:
-            raise ConfigError("data_quality.closed_weekdays must contain weekday numbers 0..6")
-        result.append(day)
-    return tuple(result)
-
-
-def _market_calendar(value: Any) -> str:
-    calendar = str(value).strip().lower()
-    if calendar not in SUPPORTED_MARKET_CALENDARS:
-        supported = ", ".join(sorted(SUPPORTED_MARKET_CALENDARS))
-        raise ConfigError(f"data_quality.market_calendar must be one of: {supported}")
-    return calendar
 
 
 @dataclass(frozen=True)
@@ -137,14 +111,6 @@ class CostConfig:
 
 
 @dataclass(frozen=True)
-class DataQualityConfig:
-    missing_bar_policy: str
-    max_gap_bars: int
-    closed_weekdays: tuple[int, ...] = ()
-    market_calendar: str = NO_MARKET_CALENDAR
-
-
-@dataclass(frozen=True)
 class ResearchConfig:
     instrument: InstrumentConfig
     timeframes: TimeframeConfig
@@ -153,7 +119,6 @@ class ResearchConfig:
     entry_point_3: EntryPoint3Config
     risk: RiskConfig
     costs: CostConfig
-    data_quality: DataQualityConfig
     direction: Direction = Direction.BOTH
     strategy_version: str = "baseline-v1"
 
@@ -166,7 +131,6 @@ class ResearchConfig:
         entry3 = _required(raw, "entry_point_3", "root")
         risk = _required(raw, "risk", "root")
         costs = _required(raw, "costs", "root")
-        quality = _required(raw, "data_quality", "root")
         if not isinstance(instrument, dict):
             raise ConfigError("[instrument] must be a table")
         if not isinstance(timeframes, dict):
@@ -175,8 +139,8 @@ class ResearchConfig:
             raise ConfigError("[trend] must be a table")
         if not isinstance(entry2, dict) or not isinstance(entry3, dict):
             raise ConfigError("entry point sections must be tables")
-        if not isinstance(risk, dict) or not isinstance(costs, dict) or not isinstance(quality, dict):
-            raise ConfigError("risk, costs, and data_quality must be tables")
+        if not isinstance(risk, dict) or not isinstance(costs, dict):
+            raise ConfigError("risk and costs must be tables")
 
         symbol = str(_required(instrument, "symbol", "instrument")).strip()
         provider = str(_required(instrument, "provider", "instrument")).strip()
@@ -280,14 +244,6 @@ class ResearchConfig:
                 ),
                 require_explicit_costs=_boolean(costs["require_explicit_costs"], "costs.require_explicit_costs"),
             ),
-            data_quality=DataQualityConfig(
-                missing_bar_policy=str(_required(quality, "missing_bar_policy", "data_quality")),
-                max_gap_bars=_nonnegative_int(
-                    _required(quality, "max_gap_bars", "data_quality"), "data_quality.max_gap_bars"
-                ),
-                closed_weekdays=_closed_weekdays(quality.get("closed_weekdays", [])),
-                market_calendar=_market_calendar(quality.get("market_calendar", NO_MARKET_CALENDAR)),
-            ),
             direction=direction,
             strategy_version=str(raw.get("strategy", {}).get("version", "baseline-v1")),
         )
@@ -295,20 +251,11 @@ class ResearchConfig:
     def __post_init__(self) -> None:
         if self.risk.target_atr <= self.risk.stop_atr:
             raise ConfigError("risk.target_atr must be greater than risk.stop_atr")
-        if self.data_quality.missing_bar_policy not in {"block", "warn", "ignore"}:
-            raise ConfigError("data_quality.missing_bar_policy must be block, warn, or ignore")
-        if self.data_quality.max_gap_bars < 0:
-            raise ConfigError("data_quality.max_gap_bars cannot be negative")
-        if any(day < 0 or day > 6 for day in self.data_quality.closed_weekdays):
-            raise ConfigError("data_quality.closed_weekdays must contain weekday numbers 0..6")
-        if self.data_quality.market_calendar not in SUPPORTED_MARKET_CALENDARS:
-            raise ConfigError("data_quality.market_calendar is unsupported")
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         result["instrument"]["price_basis"] = self.instrument.price_basis.value
         result["direction"] = self.direction.value
-        result["data_quality"]["closed_weekdays"] = list(self.data_quality.closed_weekdays)
         return result
 
     def fingerprint(self) -> str:

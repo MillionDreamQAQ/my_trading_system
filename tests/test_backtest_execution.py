@@ -26,7 +26,6 @@ def _config(spread: float = 0.0, slippage: float = 0.0, max_hold_bars: int = 80)
                 "slippage_model": "fixed", "slippage_value": slippage,
                 "commission_per_unit": 0.0, "require_explicit_costs": True,
             },
-            "data_quality": {"missing_bar_policy": "block", "max_gap_bars": 0},
         }
     )
 

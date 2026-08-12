@@ -54,6 +54,7 @@ h2 { margin-bottom: 0; font-size: 18px; letter-spacing: 0; }
 }
 .warning-band p:last-child { margin: 0; }
 
+
 .workspace, .summary-band, .analysis-band, .ledger { background: var(--surface); border: 1px solid var(--line); }
 .workspace { padding: 18px; }
 .chart-heading, .summary-band, .section-title { display: flex; justify-content: space-between; gap: 20px; }

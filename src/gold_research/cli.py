@@ -38,11 +38,6 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard_parser.add_argument("--end", required=True, help="UTC ISO end of the displayed evaluation window")
     dashboard_parser.add_argument("--warmup-start", help="optional UTC ISO start used only for indicator warm-up")
     dashboard_parser.add_argument("--oanda-cache-dir", default="data/cache/oanda")
-    dashboard_parser.add_argument(
-        "--allow-data-gaps",
-        action="store_true",
-        help="display cached or downloaded gaps as warnings instead of blocking the dashboard",
-    )
     dashboard_parser.add_argument("--host", default="127.0.0.1")
     dashboard_parser.add_argument("--port", type=int, default=8000)
     return parser
@@ -82,10 +77,6 @@ def _load_oanda(args, config):
         end=_parse_utc(args.end),
         token=token,
         cache_dir=args.oanda_cache_dir,
-        closed_weekdays=config.data_quality.closed_weekdays,
-        market_calendar=config.data_quality.market_calendar,
-        missing_bar_policy="ignore" if getattr(args, "allow_data_gaps", False) else config.data_quality.missing_bar_policy,
-        max_gap_bars=config.data_quality.max_gap_bars,
     )[:2]
 
 
@@ -103,10 +94,6 @@ def _dashboard_loader(args, config):
             end=end,
             token=token,
             cache_dir=args.oanda_cache_dir,
-            closed_weekdays=config.data_quality.closed_weekdays,
-            market_calendar=config.data_quality.market_calendar,
-            missing_bar_policy="ignore" if args.allow_data_gaps else config.data_quality.missing_bar_policy,
-            max_gap_bars=config.data_quality.max_gap_bars,
         )[0]
 
     return load_window

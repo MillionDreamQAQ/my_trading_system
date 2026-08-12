@@ -47,12 +47,12 @@ OANDA 请求只会调用 `/v3/instruments/XAU_USD/candles`。请求会按最多 
 使用 Lightweight Charts 在本地查看 K 线、入场信号和回测成交。`--warmup-start` 只用于计算指标预热，页面只展示 `--start` 到 `--end` 的数据：
 
 ```text
-python -m gold_research.cli dashboard --config configs/xauusd_baseline.toml --warmup-start 2026-08-09T22:00:00Z --start 2026-08-11T00:00:00Z --end 2026-08-11T21:00:00Z --allow-data-gaps
+python -m gold_research.cli dashboard --config configs/xauusd_baseline.toml --warmup-start 2026-08-09T22:00:00Z --start 2026-08-11T00:00:00Z --end 2026-08-11T21:00:00Z
 ```
 
-然后在浏览器打开 `http://127.0.0.1:8000`。页面支持切换 1 分钟、5 分钟、30 分钟 K 线、两个入场策略和 UTC 回测日期范围。日期范围可在运行中随时修改：看板会按需从 OANDA 下载尚未缓存的区间，并自动额外加载 7 天历史数据用于 EMA、趋势和信号预热；已加载区间会保留在当前服务进程的内存缓存中。`--warmup-start` 仅决定首次打开页面时的初始数据窗口。`--allow-data-gaps` 仅适合查看已知休市缺口，缺口会持续显示为警告。
+然后在浏览器打开 `http://127.0.0.1:8000`。页面支持切换 1 分钟、5 分钟、30 分钟 K 线、两个入场策略和 UTC 回测日期范围。日期范围可在运行中随时修改：看板会按需从 OANDA 下载尚未缓存的区间，并自动额外加载 7 天历史数据用于 EMA、趋势和信号预热；已加载区间会保留在当前服务进程的内存缓存中。`--warmup-start` 仅决定首次打开页面时的初始数据窗口。
 
-系统固定使用 OANDA `XAU_USD` 的 `mid`、`bid` 或 `ask` 价序列；合约元数据固定为 OANDA spot/CFD、1 金衡盎司、USD、最小报价单位 `0.01`、每点价值 `1.0`。基线配置使用 `oanda_xau_usd` 交易日历，以纽约时区识别周内维护休市、周末收市与复市，并自动处理夏令时；这些正常休市时段不会伪造 K 线或触发缺失数据告警。开市时段内的缺口仍会按数据质量策略阻断或告警。
+系统固定使用 OANDA `XAU_USD` 的 `mid`、`bid` 或 `ask` 价序列；合约元数据固定为 OANDA spot/CFD、1 金衡盎司、USD、最小报价单位 `0.01`、每点价值 `1.0`。历史回测以 OANDA 返回的完整 K 线为唯一时间序列事实来源；系统不根据本地日历或相邻 K 线间隔推断某一分钟应当存在。
 
 此前在聊天中暴露过的 OANDA token 应立即在 OANDA 后台撤销并重新生成。新的 token 只应通过 `OANDA_API_TOKEN` 环境变量提供。
 

@@ -47,9 +47,3 @@ slippage_model = "fixed"
 slippage_value = 0.0
 commission_per_unit = 0.0
 require_explicit_costs = true
-
-[data_quality]
-missing_bar_policy = "warn"
-max_gap_bars = 16
-closed_weekdays = [5]
-market_calendar = "oanda_xau_usd"

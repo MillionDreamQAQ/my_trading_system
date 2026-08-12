@@ -21,7 +21,6 @@ class ConfigContractTests(unittest.TestCase):
         self.assertEqual(config.timeframes.base, "1min")
         self.assertEqual(config.timeframes.medium, "5min")
         self.assertEqual(config.timeframes.large, "30min")
-        self.assertEqual(config.data_quality.market_calendar, "oanda_xau_usd")
         self.assertEqual(config.risk.max_hold_bars, 80)
         self.assertTrue(config.costs.require_explicit_costs)
         self.assertEqual(len(config.fingerprint()), 64)
@@ -51,7 +50,6 @@ class ConfigContractTests(unittest.TestCase):
             ("instrument", "tick_size", math.nan),
             ("risk", "stop_atr", math.inf),
             ("costs", "spread_value", False),
-            ("data_quality", "max_gap_bars", True),
         )
         for section, field, invalid in variants:
             with self.subTest(section=section, field=field, invalid=invalid):
@@ -61,22 +59,6 @@ class ConfigContractTests(unittest.TestCase):
 
                 with self.assertRaisesRegex(ConfigError, field):
                     load_config_from_mapping(raw)
-
-    def test_invalid_closed_weekday_is_rejected(self) -> None:
-        with Path("configs/xauusd_baseline.toml").open("rb") as handle:
-            raw = tomllib.load(handle)
-        raw["data_quality"]["closed_weekdays"] = [5, 7]
-
-        with self.assertRaisesRegex(ConfigError, "closed_weekdays"):
-            load_config_from_mapping(raw)
-
-    def test_invalid_market_calendar_is_rejected(self) -> None:
-        with Path("configs/xauusd_baseline.toml").open("rb") as handle:
-            raw = tomllib.load(handle)
-        raw["data_quality"]["market_calendar"] = "unknown"
-
-        with self.assertRaisesRegex(ConfigError, "market_calendar"):
-            load_config_from_mapping(raw)
 
     def test_boolean_fields_require_real_booleans(self) -> None:
         variants = (

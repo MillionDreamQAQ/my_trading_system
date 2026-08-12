@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import pandas as pd
 
 from ..domain import BarSeries, DataQualityIssue, REQUIRED_OHLC_COLUMNS
-from ..market_calendar import NO_MARKET_CALENDAR, unexpected_missing_bar_ranges
 from .normalize import _time_delta
 
 
@@ -21,23 +20,6 @@ class DataValidationError(ValueError):
         return "; ".join(f"{issue.code}: {issue.message}" for issue in self.issues)
 
 
-def fatal_data_issues(
-    issues: list[DataQualityIssue],
-    missing_bar_policy: str,
-    max_gap_bars: int,
-) -> list[DataQualityIssue]:
-    """Apply the configured gap policy without hiding other quality errors."""
-
-    if missing_bar_policy == "block":
-        return list(issues)
-    return [
-        issue
-        for issue in issues
-        if issue.code != "MISSING_BARS"
-        or missing_bar_policy == "warn" and issue.count > max_gap_bars
-    ]
-
-
 def _issue(code: str, message: str, **kwargs: object) -> DataQualityIssue:
     return DataQualityIssue(code=code, severity="error", message=message, **kwargs)
 
@@ -45,11 +27,14 @@ def _issue(code: str, message: str, **kwargs: object) -> DataQualityIssue:
 def validate_bar_series(
     series: BarSeries,
     expected_interval: str | None = None,
-    closed_weekdays: tuple[int, ...] = (),
-    market_calendar: str = NO_MARKET_CALENDAR,
     raise_on_error: bool = True,
 ) -> list[DataQualityIssue]:
-    """Validate timestamps, OHLC relationships, and unfilled data gaps."""
+    """Validate timestamps, OHLC relationships, and price values.
+
+    OANDA's historical-candle response is the source of truth for whether a
+    market interval traded. Gaps between returned candles are not inferred as
+    invalid local data.
+    """
 
     frame = series.bars
     interval = _time_delta(expected_interval or series.timeframe)
@@ -75,31 +60,6 @@ def validate_bar_series(
         close_expected = timestamps + interval
         if not frame["close_time"].eq(close_expected).all():
             issues.append(_issue("INVALID_CLOSE_TIME", "close_time must equal open_time plus the bar interval"))
-        gap_rows = []
-        for index in range(1, len(timestamps)):
-            previous = pd.Timestamp(timestamps.iloc[index - 1])
-            current = pd.Timestamp(timestamps.iloc[index])
-            if current - previous > interval:
-                gap_rows.extend(
-                    unexpected_missing_bar_ranges(
-                        previous,
-                        current,
-                        interval,
-                        market_calendar=market_calendar,
-                        closed_weekdays=closed_weekdays,
-                    )
-                )
-        for start, end, count in gap_rows:
-            issues.append(
-                _issue(
-                    "MISSING_BARS",
-                    f"{count} expected bar(s) missing between {start.isoformat()} and {end.isoformat()}",
-                    start=start.isoformat(),
-                    end=end.isoformat(),
-                    count=count,
-                )
-            )
-
     for column in ("open", "high", "low", "close"):
         values = pd.to_numeric(frame[column], errors="coerce")
         if values.isna().any():

@@ -392,9 +392,6 @@ slippage_value = 0.0
 commission_per_unit = 0.0
 require_explicit_costs = true
 
-[data_quality]
-missing_bar_policy = "block"
-max_gap_bars = 0
 ```
 
 `spread_value = 0.0` 只适合纯逻辑测试。正式研究运行必须使用实际或保守估计的点差、滑点，并在报告中明确这是估计值还是逐 K 线实测字段。

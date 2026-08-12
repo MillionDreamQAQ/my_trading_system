@@ -15,9 +15,8 @@ import pandas as pd
 import requests
 
 from ..domain import BarSeries, InstrumentMetadata, PriceBasis
-from ..market_calendar import NO_MARKET_CALENDAR
 from .normalize import _time_delta, normalize_ohlc_frame
-from .validate import DataValidationError, fatal_data_issues, validate_bar_series
+from .validate import DataValidationError, validate_bar_series
 
 
 class DataSourceError(RuntimeError):
@@ -213,10 +212,6 @@ def load_oanda_candles(
     cache_dir: str | Path = "data/cache/oanda",
     timeout: float = 30.0,
     session: requests.Session | None = None,
-    closed_weekdays: tuple[int, ...] = (),
-    market_calendar: str = NO_MARKET_CALENDAR,
-    missing_bar_policy: str = "block",
-    max_gap_bars: int = 0,
 ) -> tuple[BarSeries, str, Path]:
     """Load complete OANDA XAU_USD candles with deterministic pagination.
 
@@ -284,12 +279,18 @@ def load_oanda_candles(
             if not isinstance(page_candles, list):
                 raise DataSourceError("OANDA response is missing candles")
             pages.append(page)
+            # A follow-up request can be empty when the requested tail falls
+            # in an OANDA market closure. Returned complete candles remain
+            # the authoritative historical series; only an entirely empty
+            # request is rejected after normalization below.
+            if not page_candles:
+                break
             # A trailing incomplete candle denotes the provider's current
             # partial interval. It cannot be used for historical research and
             # there is no later complete candle to request.
             if any(isinstance(candle, dict) and candle.get("complete") is False for candle in page_candles):
                 break
-            last_candle = page_candles[-1] if page_candles else None
+            last_candle = page_candles[-1]
             if not isinstance(last_candle, dict) or "time" not in last_candle:
                 raise DataSourceError("OANDA returned no candles before the requested end")
             last_time = _utc_timestamp(last_candle["time"], "OANDA response contains an invalid candle timestamp")
@@ -340,12 +341,9 @@ def load_oanda_candles(
     issues = validate_bar_series(
         series,
         expected_interval=timeframe,
-        closed_weekdays=closed_weekdays,
-        market_calendar=market_calendar,
         raise_on_error=False,
     )
     series.quality_issues.extend(issues)
-    fatal = fatal_data_issues(issues, missing_bar_policy, max_gap_bars)
-    if fatal:
-        raise DataValidationError(fatal)
+    if issues:
+        raise DataValidationError(issues)
     return series, hashlib.sha256(raw).hexdigest(), cache_file

@@ -39,10 +39,6 @@ function signalReasonLabel(reason) {
 }
 
 function qualityMessage(issue) {
-  if (issue.code === "MISSING_BARS") {
-    const options = { timeZone: "UTC", hour12: false };
-    return `\u53D1\u73B0${issue.count}\u6839\u9884\u671FK\u7EBF\u7F3A\u5931\uFF0C\u533A\u95F4\u4E3A ${new Date(issue.start).toLocaleString("zh-CN", options)} \u81F3 ${new Date(issue.end).toLocaleString("zh-CN", options)} UTC\u3002`;
-  }
   return issue.message;
 }
 

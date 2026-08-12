@@ -28,7 +28,6 @@ def _config() -> ResearchConfig:
             "entry_point_3": {"enabled": True, "pullback_min_atr": 0.5, "pullback_min_bars": 2, "max_setup_bars": 10},
             "risk": {"atr_period": 2, "stop_atr": 2.0, "target_atr": 4.0, "max_hold_bars": 5},
             "costs": {"spread_model": "fixed", "spread_value": 0.0, "slippage_model": "fixed", "slippage_value": 0.0, "commission_per_unit": 0.0, "require_explicit_costs": True},
-            "data_quality": {"missing_bar_policy": "block", "max_gap_bars": 0},
         }
     )
 
@@ -97,7 +96,7 @@ class DashboardTests(unittest.TestCase):
                 display_end=datetime(2026, 1, 1, 0, 5, tzinfo=timezone.utc),
             )
 
-    def test_payload_allows_an_end_inside_a_normal_weekend_closure(self) -> None:
+    def test_payload_allows_an_end_after_the_last_oanda_bar(self) -> None:
         timestamps = pd.date_range("2026-08-07T20:00:00Z", periods=60, freq="1min", tz="UTC")
         base = normalize_ohlc_frame(
             pd.DataFrame(
@@ -112,21 +111,9 @@ class DashboardTests(unittest.TestCase):
             InstrumentMetadata(provider="test", symbol="XAUUSD", price_basis=PriceBasis.MID),
             "1min",
         )
-        config = ResearchConfig.from_mapping(
-            {
-                **_config().to_dict(),
-                "data_quality": {
-                    "missing_bar_policy": "block",
-                    "max_gap_bars": 0,
-                    "closed_weekdays": [5],
-                    "market_calendar": "oanda_xau_usd",
-                },
-            }
-        )
-
         payload = build_dashboard_payload(
             base,
-            config,
+            _config(),
             display_start=datetime(2026, 8, 7, 20, tzinfo=timezone.utc),
             display_end=datetime(2026, 8, 8, 21, tzinfo=timezone.utc),
         )
@@ -205,6 +192,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(analysis["max_consecutive_wins"], 1)
         self.assertEqual(analysis["max_consecutive_losses"], 1)
         self.assertEqual([point["value"] for point in analysis["equity_curve"]], [4.0, 2.0])
+        self.assertEqual(analysis["daily_pnl"], [{"date": "2026-01-01", "net_pnl": 2.0, "trade_count": 2}])
         self.assertEqual(analysis["by_side"]["long"]["net_pnl"], 4.0)
         self.assertEqual(analysis["by_exit_reason"]["stop"]["net_pnl"], -2.0)
 

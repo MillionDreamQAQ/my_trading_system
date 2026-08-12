@@ -18,9 +18,8 @@ from .backtest.metrics import summarize_trades
 from .config import ResearchConfig
 from .data.loader import DataSourceError
 from .data.resample import resample_bars
-from .data.validate import DataValidationError, fatal_data_issues, validate_bar_series
+from .data.validate import DataValidationError, validate_bar_series
 from .domain import BarSeries, Signal
-from .market_calendar import unexpected_missing_bar_ranges
 from .strategy.entry_point_2 import detect_entry_point_2
 from .strategy.entry_point_3 import detect_entry_point_3
 from .strategy.indicators import add_indicators, trend_state
@@ -142,17 +141,10 @@ class DashboardDataStore:
         issues = validate_bar_series(
             series,
             expected_interval=self._config.timeframes.base,
-            closed_weekdays=self._config.data_quality.closed_weekdays,
-            market_calendar=self._config.data_quality.market_calendar,
             raise_on_error=False,
         )
-        fatal = fatal_data_issues(
-            issues,
-            self._config.data_quality.missing_bar_policy,
-            self._config.data_quality.max_gap_bars,
-        )
-        if fatal:
-            raise DataValidationError(fatal)
+        if issues:
+            raise DataValidationError(issues)
         series.quality_issues.extend(issues)
         return series
 
@@ -314,7 +306,7 @@ def build_backtest_analysis(
     current_loss_streak = 0
     equity = 0.0
     equity_curve: list[dict[str, float | int]] = []
-    daily_pnl: dict[str, float] = {}
+    daily_pnl: dict[str, dict[str, float | int]] = {}
     by_side: dict[str, list[Any]] = {"long": [], "short": []}
     by_exit: dict[str, list[Any]] = {}
 
@@ -332,7 +324,9 @@ def build_backtest_analysis(
         exit_time = pd.Timestamp(trade.exit_time)
         equity_curve.append({"time": _unix_time(exit_time), "value": equity})
         daily_key = exit_time.strftime("%Y-%m-%d")
-        daily_pnl[daily_key] = daily_pnl.get(daily_key, 0.0) + value
+        daily_summary = daily_pnl.setdefault(daily_key, {"net_pnl": 0.0, "trade_count": 0})
+        daily_summary["net_pnl"] = float(daily_summary["net_pnl"]) + value
+        daily_summary["trade_count"] = int(daily_summary["trade_count"]) + 1
         by_side[trade.side.value].append(trade)
         by_exit.setdefault(str(trade.exit_reason), []).append(trade)
 
@@ -348,8 +342,8 @@ def build_backtest_analysis(
             "max_consecutive_losses": longest_loss_streak,
             "equity_curve": equity_curve,
             "daily_pnl": [
-                {"date": date, "net_pnl": value}
-                for date, value in sorted(daily_pnl.items(), reverse=True)
+                {"date": date, **summary}
+                for date, summary in sorted(daily_pnl.items(), reverse=True)
             ],
             "by_side": {side: _trade_group_analysis(group) for side, group in by_side.items()},
             "by_exit_reason": {
@@ -376,21 +370,6 @@ def _target_frame(frame: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -
     return frame[(frame["open_time"] >= start) & (frame["close_time"] <= end)].copy()
 
 
-def _ends_during_expected_closure(base: BarSeries, end: pd.Timestamp, config: ResearchConfig) -> bool:
-    """Allow a requested tail after the final bar only when the market was closed."""
-
-    if base.bars.empty:
-        return False
-    last_open = pd.Timestamp(base.bars["open_time"].iloc[-1])
-    return not unexpected_missing_bar_ranges(
-        last_open,
-        end,
-        pd.Timedelta(base.timeframe),
-        market_calendar=config.data_quality.market_calendar,
-        closed_weekdays=config.data_quality.closed_weekdays,
-    )
-
-
 def build_dashboard_payload(
     base: BarSeries,
     config: ResearchConfig,
@@ -406,7 +385,7 @@ def build_dashboard_payload(
         raise ValueError("dashboard end must be after dashboard start")
     if base.start is None or base.end is None:
         raise ValueError("dashboard data is empty")
-    if start < base.start or (end > base.end and not _ends_during_expected_closure(base, end, config)):
+    if start < base.start:
         raise ValueError("dashboard range must stay within the loaded data window")
 
     medium = resample_bars(base, config.timeframes.medium)

@@ -14,7 +14,6 @@ def _config(
     direction: str = "both",
     *,
     base_timeframe: str = "15min",
-    market_calendar: str = "none",
 ) -> ResearchConfig:
     return ResearchConfig.from_mapping(
         {
@@ -30,7 +29,6 @@ def _config(
                 "slippage_model": "fixed", "slippage_value": 0.0,
                 "commission_per_unit": 0.0, "require_explicit_costs": True,
             },
-            "data_quality": {"missing_bar_policy": "block", "max_gap_bars": 0, "market_calendar": market_calendar},
         }
     )
 
@@ -77,38 +75,11 @@ class EntryPoint3Tests(unittest.TestCase):
         self.assertEqual(result.signals, ())
         self.assertEqual(result.setups[0].cancel_reason, "close_below_initial_breakout")
 
-    def test_data_gap_cancels_an_active_setup(self) -> None:
+    def test_oanda_returned_gap_does_not_cancel_an_active_setup(self) -> None:
         context = _context([100, 100, 100, 100, 101, 103, 101.8, 101.5, 102.5])
         context.loc[6:, ["open_time", "close_time", "signal_time"]] += pd.Timedelta(hours=1)
 
         result = detect_entry_point_3(context, _config())
-
-        self.assertEqual(result.signals, ())
-        self.assertIn("data_gap", [setup.cancel_reason for setup in result.setups])
-
-    def test_daily_maintenance_does_not_cancel_an_active_setup(self) -> None:
-        context = _context([100, 100, 100, 100, 101, 103, 101.8, 101.5, 102.5], atr=2.0)
-        timestamps = pd.DatetimeIndex(
-            [
-                "2026-08-10T20:55:00Z",
-                "2026-08-10T20:56:00Z",
-                "2026-08-10T20:57:00Z",
-                "2026-08-10T20:58:00Z",
-                "2026-08-10T20:59:00Z",
-                "2026-08-10T22:04:00Z",
-                "2026-08-10T22:05:00Z",
-                "2026-08-10T22:06:00Z",
-                "2026-08-10T22:07:00Z",
-            ]
-        )
-        context["open_time"] = timestamps
-        context["close_time"] = timestamps + pd.Timedelta("1min")
-        context["signal_time"] = context["close_time"]
-
-        result = detect_entry_point_3(
-            context,
-            _config(base_timeframe="1min", market_calendar="oanda_xau_usd"),
-        )
 
         self.assertEqual(len(result.signals), 1)
         self.assertNotIn("data_gap", [setup.cancel_reason for setup in result.setups])

@@ -32,7 +32,6 @@ def _config(direction: str = "both") -> ResearchConfig:
                 "commission_per_unit": 0.0,
                 "require_explicit_costs": True,
             },
-            "data_quality": {"missing_bar_policy": "block", "max_gap_bars": 0},
         }
     )
 
