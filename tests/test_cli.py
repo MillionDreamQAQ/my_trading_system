@@ -20,7 +20,7 @@ from gold_research.domain import InstrumentMetadata, PriceBasis
 def _oanda_series():
     frame = pd.DataFrame(
         {
-            "timestamp": pd.date_range("2026-01-01", periods=3, freq="15min", tz="UTC"),
+            "timestamp": pd.date_range("2026-01-01", periods=3, freq="1min", tz="UTC"),
             "open": [100.0, 101.0, 102.0],
             "high": [101.0, 102.0, 103.0],
             "low": [99.0, 100.0, 101.0],
@@ -39,7 +39,7 @@ def _oanda_series():
             tick_size=0.01,
             point_value=1.0,
         ),
-        "15min",
+        "1min",
     )
 
 
@@ -85,6 +85,7 @@ class CliSourceTests(unittest.TestCase):
         self.assertIs(captured["series"], series)
         self.assertEqual(captured["strategy_id"], "entry_point_2")
         self.assertEqual(loader.call_args.args[0], "XAU_USD")
+        self.assertEqual(loader.call_args.args[1], "1min")
         self.assertEqual(loader.call_args.kwargs["token"], "test-token")
         metadata = loader.call_args.args[2]
         self.assertEqual(metadata.provider, "oanda")

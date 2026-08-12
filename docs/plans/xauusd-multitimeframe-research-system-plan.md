@@ -19,7 +19,7 @@ created_at: 2026-08-12
 - **首要价值:** 把“看图判断买点”变成没有未来函数、可以逐条解释、可以批量回测的规则系统。
 - **默认交易方向:** 同时支持做多和做空；图示中的下跌做空逻辑必须与做多逻辑保持镜像。
 - **默认品种:** XAUUSD 现货/CFD 历史价格。系统不依赖集中式真实成交量，也不把现货数据直接当作 COMEX 或上期所期货数据。
-- **默认周期:** 基础执行周期 15 分钟，中级别 1 小时，大级别 4 小时。三者必须从同一份原始数据按统一时区重采样得到。
+- **默认周期:** 基础执行周期 1 分钟，中级别 5 分钟，大级别 30 分钟。三者必须从同一份原始数据按统一时区重采样得到。
 - **停止条件:** 任一运行存在未处理的数据缺口、时间戳重复、OHLC 关系非法、未明确成本模型或可能使用未来 K 线时，运行必须失败或明确标记为不可用于研究结论。
 - **审阅重点:** 价格来源与交易场所、基准参数、入场点3的回调定义、成本模型和退出规则是本方案的主要可调整点。
 
@@ -50,7 +50,7 @@ created_at: 2026-08-12
 - R3. 系统必须校验时间戳可解析、统一转换为 UTC、严格递增且不重复；价格必须为正数，并满足 `high >= max(open, close)` 和 `low <= min(open, close)`。
 - R4. 系统不得默认填补缺失 K 线。缺口必须被记录为数据质量事件，并由配置决定是阻断运行还是允许运行但在报告中标红。
 - R5. 系统必须支持 CSV 和 Parquet 两种本地输入格式。第一版不把某一家数据商的下载 API 写死在策略代码中，数据商接入必须位于独立适配层。
-- R6. 系统必须从同一份原始数据生成 15 分钟、1 小时和 4 小时序列。重采样边界固定使用 UTC，并只输出完整的高周期 K 线。
+- R6. 系统必须从同一份原始数据生成 1 分钟、5 分钟和 30 分钟序列。重采样边界固定使用 UTC，并只输出完整的高周期 K 线。
 - R7. 系统必须区分 `mid`、`bid`、`ask` 三种价格基准。若输入只有单一价格序列，成本模型必须明确说明如何近似买卖价差。
 
 #### Trend and signal identification
@@ -114,7 +114,7 @@ created_at: 2026-08-12
 - AE1. **有效数据可导入**
   - **Given:** 一份 UTC 或带明确时区的 XAUUSD OHLC 文件，时间戳唯一且 OHLC 关系合法。
   - **When:** 运行数据导入和重采样。
-  - **Then:** 生成标准化 15m、1h、4h 序列，元数据中保留来源和文件指纹，并报告覆盖区间。
+  - **Then:** 生成标准化 1m、5m、30m 序列，元数据中保留来源和文件指纹，并报告覆盖区间。
   - **Covers:** R1-R7.
 
 - AE2. **数据错误被阻断或显式警告**
@@ -194,7 +194,7 @@ created_at: 2026-08-12
 |---|---|---|
 | Instrument | XAUUSD spot/CFD historical data | 直接支持多空，避免第一版处理期货换月；但必须最终使用实际执行场所的数据复核 |
 | Raw source | Local CSV/Parquet with provider metadata | 让策略和数据商解耦，先验证规则，不被 API 凭证和供应商差异阻塞 |
-| Timeframes | 15m / 1h / 4h | 与当前策略讨论一致，足以表达基础执行、中级别和大级别方向 |
+| Timeframes | 1m / 5m / 30m | 用于更细粒度的基础执行、中级别和大级别方向判断 |
 | Entry point 2 | Same-direction EMA filters plus fresh 20-bar breakout | 最容易复现，适合作为基线 |
 | Entry point 3 | Initial breakout, 0.5 ATR pullback, 2-bar minimum, re-breakout | 将“回调后再次顺势”转化为有限状态机 |
 | Baseline exits | 2 ATR stop, 4 ATR target, 80 base bars timeout | 形成可比较的研究闭环，不把复杂退出逻辑混入入场验证 |
@@ -208,7 +208,7 @@ created_at: 2026-08-12
 
 - KTD2. **策略代码使用供应商无关的标准化数据契约。** 具体数据商放在数据适配层，策略只消费标准化 OHLC 和来源元数据。这样可以用本地样本快速开发，也能在后续使用实际经纪商数据复核，不需要重写信号逻辑。
 
-- KTD3. **所有周期从同一份原始序列派生，内部统一 UTC。** 不允许分别加载来源不同的 15m、1h、4h 文件进行拼接。高周期状态只能使用在信号 K 线收盘前已经完成的高周期 K 线，避免边界差异和未来函数。
+- KTD3. **所有周期从同一份原始序列派生，内部统一 UTC。** 不允许分别加载来源不同的 1m、5m、30m 文件进行拼接。高周期状态只能使用在信号 K 线收盘前已经完成的高周期 K 线，避免边界差异和未来函数。
 
 - KTD4. **使用规则引擎与有限状态机，而不是事后摆动点标注。** 入场点2的突破规则直接由已完成 K 线计算；入场点3逐根推进状态。任何依赖未来右侧 K 线确认的摆动点算法只能作为离线分析工具，不能进入正式信号路径。
 
@@ -226,7 +226,7 @@ created_at: 2026-08-12
 flowchart LR
   A[Raw XAUUSD OHLC] --> B[Loader and Validator]
   B --> C[UTC Normalizer]
-  C --> D[15m 1h 4h Resampler]
+  C --> D[1m 5m 30m Resampler]
   D --> E[Trend Context]
   E --> F[Entry Point 2]
   E --> G[Entry Point 3 State Machine]
@@ -255,7 +255,7 @@ flowchart LR
 以基础周期 K 线 `B_t` 为例：
 
 1. 在 `B_t` 收盘时计算当前基础周期指标和小级别突破条件。
-2. 对 1h 和 4h，只读取 `close_time <= B_t.close_time` 的最近完整高周期 K 线。
+2. 对 5m 和 30m，只读取 `close_time <= B_t.close_time` 的最近完整高周期 K 线。
 3. 若条件成立，写入 `signal_time = B_t.close_time`。
 4. 默认写入 `entry_time = B_(t+1).open_time`，成交价由成本模型计算。
 5. 若 `B_(t+1)` 缺失，保留候选信号但不生成成交，并记录 `unfilled_reason`。
@@ -265,9 +265,9 @@ flowchart LR
 多头在基础周期收盘时满足以下条件才产生信号：
 
 ```text
-trend_4h == UP
-and trend_1h == UP
-and trend_15m == UP
+trend_30m == UP
+and trend_5m == UP
+and trend_1m == UP
 and close_t > max(high[t-20 : t-1])
 and close_(t-1) <= max(high[t-21 : t-2])
 ```
@@ -358,9 +358,9 @@ symbol = "XAUUSD"
 price_basis = "mid"
 
 [timeframes]
-base = "15min"
-medium = "1h"
-large = "4h"
+base = "1min"
+medium = "5min"
+large = "30min"
 timezone = "UTC"
 
 [trend]
@@ -415,26 +415,26 @@ max_gap_bars = 0
 
 ### U2. Historical data loading, validation, and resampling
 
-- **Goal:** 将 CSV/Parquet 输入转换为统一 UTC、质量可追踪的 15m/1h/4h 序列。
+- **Goal:** 将 CSV/Parquet 输入转换为统一 UTC、质量可追踪的 1m/5m/30m 序列。
 - **Files:** `src/gold_research/data/loader.py`, `src/gold_research/data/normalize.py`, `src/gold_research/data/validate.py`, `src/gold_research/data/resample.py`, `tests/fixtures/xauusd_synthetic.csv`, `tests/fixtures/xauusd_boundary_cases.csv`, `tests/test_resampling.py`。
 - **Approach:** loader 只负责读取，normalize 只负责字段和时区，validate 只负责质量判定，resample 只处理周期边界；禁止用隐式前向填充制造缺失 K 线。
 - **Test scenarios:**
   - naive timestamp 在元数据指定时区后能正确转成 UTC；缺少时区时正式运行失败。
   - 重复时间戳、非法 OHLC、非正价格、未排序时间戳得到稳定错误码。
-  - 跨 1h 和 4h 边界的样本只生成完整高周期 K 线，聚合 OHLC 结果正确。
+  - 跨 5m 和 30m 边界的样本只生成完整高周期 K 线，聚合 OHLC 结果正确。
   - 缺失基础周期 K 线不会被自动补齐，缺口事件包含开始时间、结束时间和缺口长度。
   - CSV 和 Parquet 对同一数据产生一致的标准化结果。
 - **Verification:** 使用边界 fixture 检查夏令时或供应商日界线差异不会改变内部 UTC 结果；不能把不同来源的高周期文件混入同一运行。
 
 ### U3. Multi-timeframe trend context without look-ahead
 
-- **Goal:** 计算各周期 EMA 趋势，并把已完成的 1h/4h 状态安全对齐到基础周期收盘。
+- **Goal:** 计算各周期 EMA 趋势，并把已完成的 5m/30m 状态安全对齐到基础周期收盘。
 - **Files:** `src/gold_research/strategy/indicators.py`, `src/gold_research/strategy/timeframe_context.py`, `tests/test_timeframe_context.py`。
 - **Approach:** 指标在各自完整周期序列上计算；使用显式的时间对齐函数，不使用事后 pivot；每一行趋势上下文保存来源高周期 K 线的结束时间，方便审计。
 - **Test scenarios:**
   - EMA20、EMA60 和 slope lookback 使用同周期数据，初始 warm-up 区间不产生趋势信号。
   - 基础周期信号只能看到已经收盘的高周期 K 线。
-  - 修改一个信号时间之后的 4h K 线不会改变之前的趋势上下文。
+  - 修改一个信号时间之后的 30m K 线不会改变之前的趋势上下文。
   - 大中小周期任一趋势为 `UNKNOWN` 时，入场条件不成立而不是默认为多头或空头。
   - 多头与空头趋势条件对同一对称价格序列产生镜像结果。
 - **Verification:** 执行未来数据扰动测试，确保历史前缀输出字节级一致或字段级完全一致。
@@ -506,7 +506,7 @@ max_gap_bars = 0
 | Gate | Expected evidence | Applies to |
 |---|---|---|
 | Data contract | 合法/非法输入测试通过，错误码稳定 | U1, U2 |
-| Resampling | 同源数据生成的 15m/1h/4h 边界测试通过 | U2 |
+| Resampling | 同源数据生成的 1m/5m/30m 边界测试通过 | U2 |
 | Look-ahead safety | 未来数据扰动不改变历史前缀信号和趋势上下文 | U3, U4, U5 |
 | Entry point 2 | 新突破、重复突破、长短镜像和 warm-up 测试通过 | U4 |
 | Entry point 3 | 状态转换、取消、超时、二次突破和镜像测试通过 | U5 |
@@ -541,7 +541,7 @@ python -m gold_research.cli run --config configs/xauusd_baseline.toml --input <d
 ## Definition of Done
 
 - U1-U7 的实现文件和对应测试文件齐全，测试通过。
-- XAUUSD CSV/Parquet 能被标准化为统一 UTC 的 15m、1h、4h 序列，并能阻断或显式报告数据质量问题。
+- XAUUSD CSV/Parquet 能被标准化为统一 UTC 的 1m、5m、30m 序列，并能阻断或显式报告数据质量问题。
 - 入场点2能输出做多和做空的新突破候选信号，成交严格推迟到下一根基础周期开盘。
 - 入场点3能输出完整状态转换日志，并正确处理有效回调、失效、超时和二次突破。
 - 未来数据扰动测试通过，历史前缀信号不会变化。
@@ -572,9 +572,9 @@ python -m gold_research.cli run --config configs/xauusd_baseline.toml --input <d
 
 ### Glossary
 
-- **基础周期:** 实际产生信号并模拟下一根开盘成交的周期，默认 15 分钟。
-- **中级别:** 默认 1 小时趋势过滤周期。
-- **大级别:** 默认 4 小时趋势过滤周期。
+- **基础周期:** 实际产生信号并模拟下一根开盘成交的周期，默认 1 分钟。
+- **中级别:** 默认 5 分钟趋势过滤周期。
+- **大级别:** 默认 30 分钟趋势过滤周期。
 - **已完成 K 线:** 在当前信号时间之前已经收盘、其 OHLC 不会再变化的 K 线。
 - **新突破:** 当前收盘首次越过由前 N 根已完成 K 线计算出的突破水平。
 - **setup:** 入场点3从初始突破开始，到二次突破或失效结束的一段状态生命周期。

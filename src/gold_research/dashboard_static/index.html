@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>&#x9EC4;&#x91D1;&#x5386;&#x53F2;&#x7814;&#x7A76;&#x770B;&#x677F;</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">&#x5386;&#x53F2;&#x7814;&#x7A76;</p>
+          <h1 id="instrument-name">XAU_USD</h1>
+        </div>
+      </div>
+      <div class="run-meta">
+        <span id="window-label">&#x6B63;&#x5728;&#x52A0;&#x8F7D;&#x56FE;&#x8868;&#x6570;&#x636E;</span>
+        <span class="separator" aria-hidden="true">|</span>
+        <span id="source-label">OANDA</span>
+      </div>
+    </header>
+
+    <main>
+      <section id="warning-band" class="warning-band" hidden>
+        <div>
+          <p class="eyebrow">&#x6570;&#x636E;&#x8D28;&#x91CF;</p>
+          <p id="warning-copy"></p>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="&#x56FE;&#x8868;&#x5DE5;&#x4F5C;&#x533A;">
+        <div class="chart-heading">
+          <div>
+            <p class="eyebrow">&#x4EF7;&#x683C;&#x4E0E;&#x4FE1;&#x53F7;</p>
+            <h2 id="chart-title">1&#x5206;&#x949F;K&#x7EBF;</h2>
+          </div>
+          <div class="controls" aria-label="&#x56FE;&#x8868;&#x63A7;&#x5236;&#x9879;">
+            <form id="date-range-form" class="date-range" aria-label="&#x56DE;&#x6D4B;&#x65E5;&#x671F;&#x8303;&#x56F4;">
+              <label>
+                <span>&#x5F00;&#x59CB;&#xFF08;UTC&#xFF09;</span>
+                <input id="range-start" name="start" type="datetime-local" required>
+              </label>
+              <label>
+                <span>&#x7ED3;&#x675F;&#xFF08;UTC&#xFF09;</span>
+                <input id="range-end" name="end" type="datetime-local" required>
+              </label>
+              <button id="apply-range" type="submit">&#x5E94;&#x7528;</button>
+            </form>
+            <fieldset class="segmented">
+              <legend class="sr-only">&#x65F6;&#x95F4;&#x5468;&#x671F;</legend>
+              <label><input type="radio" name="timeframe" value="1min" checked><span>1&#x5206;</span></label>
+              <label><input type="radio" name="timeframe" value="5min"><span>5&#x5206;</span></label>
+              <label><input type="radio" name="timeframe" value="30min"><span>30&#x5206;</span></label>
+            </fieldset>
+            <fieldset class="segmented strategy-switch">
+              <legend class="sr-only">&#x4FE1;&#x53F7;&#x7B56;&#x7565;</legend>
+              <label><input type="radio" name="strategy" value="all"><span>&#x5168;&#x90E8;</span></label>
+              <label><input type="radio" name="strategy" value="entry_point_2" checked><span>&#x5165;&#x573A;&#x70B9;2</span></label>
+              <label><input type="radio" name="strategy" value="entry_point_3"><span>&#x5165;&#x573A;&#x70B9;3</span></label>
+            </fieldset>
+          </div>
+          <p id="range-message" class="range-message" aria-live="polite" hidden></p>
+        </div>
+
+        <div class="chart-review-grid">
+          <div class="chart-column">
+            <div class="chart-shell">
+              <div id="chart" aria-label="&#x5386;&#x53F2;&#x4EF7;&#x683C;&#x56FE;&#x8868;"></div>
+              <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+            </div>
+
+            <div class="legend" aria-label="&#x56FE;&#x8868;&#x56FE;&#x4F8B;">
+              <span><i class="legend-dot entry-long"></i>&#x505A;&#x591A;&#x4FE1;&#x53F7;</span>
+              <span><i class="legend-dot entry-short"></i>&#x505A;&#x7A7A;&#x4FE1;&#x53F7;</span>
+              <span><i class="legend-line ema-fast"></i>EMA &#x5FEB;&#x7EBF;</span>
+              <span><i class="legend-line ema-slow"></i>EMA &#x6162;&#x7EBF;</span>
+              <span><i class="legend-line target"></i>&#x5F53;&#x524D;&#x4EA4;&#x6613;&#x6B62;&#x76C8;</span>
+              <span><i class="legend-line stop"></i>&#x5F53;&#x524D;&#x4EA4;&#x6613;&#x6B62;&#x635F;</span>
+              <span id="bar-count">0 &#x6839;K&#x7EBF;</span>
+            </div>
+          </div>
+
+          <aside class="trade-review" aria-labelledby="review-title">
+            <div class="review-heading">
+              <div>
+                <p class="eyebrow">&#x4FE1;&#x53F7;&#x590D;&#x76D8;</p>
+                <h2 id="review-title">&#x4EA4;&#x6613;&#x590D;&#x76D8;</h2>
+              </div>
+              <div class="review-navigation">
+                <button id="previous-trade" class="icon-button" type="button" aria-label="&#x4E0A;&#x4E00;&#x7B14;&#x4EA4;&#x6613;" title="&#x4E0A;&#x4E00;&#x7B14;&#x4EA4;&#x6613;">&larr;</button>
+                <button id="next-trade" class="icon-button" type="button" aria-label="&#x4E0B;&#x4E00;&#x7B14;&#x4EA4;&#x6613;" title="&#x4E0B;&#x4E00;&#x7B14;&#x4EA4;&#x6613;">&rarr;</button>
+              </div>
+            </div>
+            <div id="review-empty" class="review-empty">&#x9009;&#x62E9;&#x4FE1;&#x53F7;&#x6216;&#x4EA4;&#x6613;&#x6807;&#x8BB0;&#x4EE5;&#x67E5;&#x770B;&#x5176;&#x8FDB;&#x573A;&#x6761;&#x4EF6;&#x3002;</div>
+            <div id="review-content" hidden>
+              <div class="review-keyline">
+                <span id="review-strategy" class="strategy-badge">&#x5165;&#x573A;&#x70B92</span>
+                <span id="review-side" class="side">&#x505A;&#x591A;</span>
+              </div>
+              <p id="review-reason" class="review-reason"></p>
+              <dl class="review-facts">
+                <div><dt>&#x4FE1;&#x53F7;&#x65F6;&#x95F4;</dt><dd id="review-signal-time">-</dd></div>
+                <div><dt>&#x5165;&#x573A;&#x65F6;&#x95F4;</dt><dd id="review-entry-time">-</dd></div>
+                <div><dt>&#x7A81;&#x7834;&#x4F4D;</dt><dd id="review-breakout">-</dd></div>
+                <div><dt>ATR</dt><dd id="review-atr">-</dd></div>
+              </dl>
+              <div class="context-block">
+                <p class="eyebrow">&#x4FE1;&#x53F7;&#x65F6;&#x7684;&#x8D8B;&#x52BF;</p>
+                <div class="trend-grid">
+                  <div><span>1&#x5206;</span><strong id="trend-base">-</strong></div>
+                  <div><span>5&#x5206;</span><strong id="trend-medium">-</strong></div>
+                  <div><span>30&#x5206;</span><strong id="trend-large">-</strong></div>
+                </div>
+              </div>
+              <div id="trade-execution" class="context-block" hidden>
+                <p class="eyebrow">&#x6267;&#x884C;&#x7ED3;&#x679C;</p>
+                <dl class="review-facts execution-facts">
+                  <div><dt>&#x5165;&#x573A;&#x4EF7;&#x683C;</dt><dd id="review-entry-price">-</dd></div>
+                  <div><dt>&#x6B62;&#x635F;</dt><dd id="review-stop">-</dd></div>
+                  <div><dt>&#x6B62;&#x76C8;</dt><dd id="review-target">-</dd></div>
+                  <div><dt>&#x51FA;&#x573A;</dt><dd id="review-exit">-</dd></div>
+                  <div><dt>&#x76C8;&#x4E8F;</dt><dd id="review-pnl">-</dd></div>
+                  <div><dt>&#x6301;&#x4ED3;K&#x7EBF;</dt><dd id="review-hold">-</dd></div>
+                </dl>
+              </div>
+              <p id="review-note" class="review-note"></p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="summary-band" aria-label="&#x7B56;&#x7565;&#x6C47;&#x603B;">
+        <div class="section-title">
+          <p class="eyebrow">&#x5F53;&#x524D;&#x7B56;&#x7565;</p>
+          <h2 id="strategy-title">&#x5168;&#x90E8;&#x4FE1;&#x53F7;</h2>
+        </div>
+        <dl class="metrics">
+          <div><dt>&#x4FE1;&#x53F7;&#x6570;</dt><dd id="metric-signals">-</dd></div>
+          <div><dt>&#x4EA4;&#x6613;&#x6570;</dt><dd id="metric-trades">-</dd></div>
+          <div><dt>&#x51C0;&#x76C8;&#x4E8F;</dt><dd id="metric-pnl">-</dd></div>
+          <div><dt>&#x6700;&#x5927;&#x56DE;&#x64A4;</dt><dd id="metric-dd">-</dd></div>
+          <div><dt>&#x80DC;&#x7387;</dt><dd id="metric-win-rate">-</dd></div>
+        </dl>
+      </section>
+
+      <section class="analysis-band" aria-labelledby="analysis-title">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">&#x56DE;&#x6D4B;&#x5206;&#x6790;</p>
+            <h2 id="analysis-title">&#x7B56;&#x7565;&#x7ED3;&#x679C;&#x89E3;&#x8BFB;</h2>
+          </div>
+          <div class="analysis-settings">
+            <label class="capital-control">
+              <span>&#x8D77;&#x59CB;&#x8D44;&#x91D1;&#xFF08;USD&#xFF09;</span>
+              <input id="initial-capital" type="number" min="1" step="100" inputmode="decimal" value="10000" aria-label="&#x8D77;&#x59CB;&#x8D44;&#x91D1;&#xFF08;USD&#xFF09;">
+            </label>
+            <p id="analysis-subtitle" class="section-note"></p>
+          </div>
+        </div>
+
+        <div id="comparison-view" class="comparison-grid" hidden>
+          <article class="analysis-table-wrap">
+            <table class="analysis-table">
+              <thead><tr><th>&#x6307;&#x6807;</th><th>&#x5165;&#x573A;&#x70B92</th><th>&#x5165;&#x573A;&#x70B93</th></tr></thead>
+              <tbody id="comparison-body"></tbody>
+            </table>
+          </article>
+        </div>
+
+        <div id="single-analysis-view">
+          <div class="analysis-grid">
+            <article class="analysis-panel equity-panel">
+              <div class="panel-heading"><h3>&#x7D2F;&#x8BA1;&#x51C0;&#x76C8;&#x4E8F;</h3><span id="analysis-final-equity" class="panel-value">-</span></div>
+              <div id="equity-chart" class="equity-chart" aria-label="&#x7D2F;&#x8BA1;&#x51C0;&#x76C8;&#x4E8F;&#x66F2;&#x7EBF;"></div>
+            </article>
+            <article class="analysis-panel">
+              <div class="panel-heading"><h3>&#x6536;&#x76CA;&#x4E0E;&#x98CE;&#x9669;</h3></div>
+              <dl class="analysis-facts">
+                <div><dt>&#x8D77;&#x59CB;&#x8D44;&#x91D1;</dt><dd id="analysis-initial-capital">-</dd></div>
+                <div><dt>&#x8D26;&#x6237;&#x6536;&#x76CA;&#x7387;</dt><dd id="analysis-return-rate">-</dd></div>
+                <div><dt>&#x6700;&#x5927;&#x56DE;&#x64A4;</dt><dd id="analysis-max-drawdown">-</dd></div>
+                <div><dt>&#x6700;&#x5927;&#x56DE;&#x64A4;&#x7387;</dt><dd id="analysis-drawdown-rate">-</dd></div>
+                <div><dt>&#x5229;&#x6DA6;&#x56E0;&#x5B50;</dt><dd id="analysis-profit-factor">-</dd></div>
+                <div><dt>&#x76C8;&#x4E8F;&#x6BD4;</dt><dd id="analysis-payoff">-</dd></div>
+                <div><dt>&#x5E73;&#x5747;&#x5355;&#x7B14;</dt><dd id="analysis-average-pnl">-</dd></div>
+                <div><dt>&#x5E73;&#x5747;&#x6301;&#x4ED3;</dt><dd id="analysis-average-hold">-</dd></div>
+                <div><dt>&#x5355;&#x7B14;&#x6700;&#x5927;&#x76C8;&#x5229;</dt><dd id="analysis-largest-win">-</dd></div>
+                <div><dt>&#x5355;&#x7B14;&#x6700;&#x5927;&#x4E8F;&#x635F;</dt><dd id="analysis-largest-loss">-</dd></div>
+              </dl>
+            </article>
+            <article class="analysis-panel">
+              <div class="panel-heading"><h3>&#x6267;&#x884C;&#x4E0E;&#x8FDE;&#x7EED;&#x7ED3;&#x679C;</h3></div>
+              <dl class="analysis-facts">
+                <div><dt>&#x4FE1;&#x53F7;&#x6210;&#x4EA4;&#x7387;</dt><dd id="analysis-fill-rate">-</dd></div>
+                <div><dt>&#x672A;&#x6210;&#x4EA4;&#x4FE1;&#x53F7;</dt><dd id="analysis-unfilled">-</dd></div>
+                <div><dt>&#x8FDE;&#x7EED;&#x76C8;&#x5229;</dt><dd id="analysis-win-streak">-</dd></div>
+                <div><dt>&#x8FDE;&#x7EED;&#x4E8F;&#x635F;</dt><dd id="analysis-loss-streak">-</dd></div>
+                <div><dt>&#x505A;&#x591A;&#x51C0;&#x76C8;&#x4E8F;</dt><dd id="analysis-long-pnl">-</dd></div>
+                <div><dt>&#x505A;&#x7A7A;&#x51C0;&#x76C8;&#x4E8F;</dt><dd id="analysis-short-pnl">-</dd></div>
+              </dl>
+            </article>
+          </div>
+
+          <div class="analysis-grid attribution-grid">
+            <article class="analysis-panel">
+              <div class="panel-heading"><h3>&#x51FA;&#x573A;&#x5F52;&#x56E0;</h3></div>
+              <div id="exit-analysis" class="attribution-list"></div>
+            </article>
+            <article class="analysis-panel">
+              <div class="panel-heading"><h3>&#x6309;&#x65E5;&#x51C0;&#x76C8;&#x4E8F;</h3></div>
+              <div id="daily-analysis" class="attribution-list"></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="ledger" aria-labelledby="ledger-title">
+        <div class="section-title">
+          <p class="eyebrow">&#x4EA4;&#x6613;&#x660E;&#x7EC6;</p>
+          <h2 id="ledger-title">&#x5DF2;&#x5B8C;&#x6210;&#x4EA4;&#x6613;</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>&#x7B56;&#x7565;</th>
+                <th>&#x65B9;&#x5411;</th>
+                <th>&#x5165;&#x573A;&#x65F6;&#x95F4;&#xFF08;UTC&#xFF09;</th>
+                <th>&#x51FA;&#x573A;&#x65F6;&#x95F4;&#xFF08;UTC&#xFF09;</th>
+                <th>&#x51FA;&#x573A;&#x65B9;&#x5F0F;</th>
+                <th>&#x51C0;&#x76C8;&#x4E8F;</th>
+                <th>&#x6301;&#x4ED3;K&#x7EBF;</th>
+              </tr>
+            </thead>
+            <tbody id="trades-body"></tbody>
+          </table>
+          <p id="no-trades" class="empty-state" hidden>&#x5F53;&#x524D;&#x533A;&#x95F4;&#x6CA1;&#x6709;&#x5DF2;&#x5B8C;&#x6210;&#x4EA4;&#x6613;&#x3002;</p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

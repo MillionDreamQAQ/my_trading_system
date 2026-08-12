@@ -10,6 +10,33 @@ from gold_research.domain import InstrumentMetadata, PriceBasis
 
 
 class ResamplingTests(unittest.TestCase):
+    def test_one_minute_source_produces_complete_five_and_thirty_minute_bars(self) -> None:
+        timestamps = pd.date_range("2026-01-01 00:00", periods=31, freq="1min", tz="UTC")
+        frame = pd.DataFrame(
+            {
+                "timestamp": timestamps,
+                "open": range(100, 131),
+                "high": range(101, 132),
+                "low": range(99, 130),
+                "close": range(100, 131),
+            }
+        )
+        source = normalize_ohlc_frame(
+            frame,
+            InstrumentMetadata(provider="test-provider", symbol="XAU_USD", price_basis=PriceBasis.MID),
+            "1min",
+        )
+
+        five_minute = resample_bars(source, "5min")
+        thirty_minute = resample_bars(source, "30min")
+
+        self.assertEqual(len(five_minute.bars), 6)
+        self.assertEqual(len(thirty_minute.bars), 1)
+        self.assertEqual(five_minute.bars.iloc[0]["open"], 100)
+        self.assertEqual(five_minute.bars.iloc[0]["close"], 104)
+        self.assertEqual(thirty_minute.bars.iloc[0]["open"], 100)
+        self.assertEqual(thirty_minute.bars.iloc[0]["close"], 129)
+
     def test_only_complete_utc_hour_bars_are_emitted(self) -> None:
         timestamps = pd.date_range("2026-01-01 00:00", periods=9, freq="15min", tz="UTC")
         frame = pd.DataFrame(

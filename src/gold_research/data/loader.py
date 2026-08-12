@@ -15,6 +15,7 @@ import pandas as pd
 import requests
 
 from ..domain import BarSeries, InstrumentMetadata, PriceBasis
+from ..market_calendar import NO_MARKET_CALENDAR
 from .normalize import _time_delta, normalize_ohlc_frame
 from .validate import DataValidationError, fatal_data_issues, validate_bar_series
 
@@ -30,6 +31,7 @@ OANDA_MAX_CANDLES = 5000
 def _oanda_granularity(timeframe: str) -> str:
     value = timeframe.lower().replace(" ", "")
     mapping = {
+        "1min": "M1",
         "5min": "M5",
         "15min": "M15",
         "30min": "M30",
@@ -212,6 +214,7 @@ def load_oanda_candles(
     timeout: float = 30.0,
     session: requests.Session | None = None,
     closed_weekdays: tuple[int, ...] = (),
+    market_calendar: str = NO_MARKET_CALENDAR,
     missing_bar_policy: str = "block",
     max_gap_bars: int = 0,
 ) -> tuple[BarSeries, str, Path]:
@@ -238,6 +241,9 @@ def load_oanda_candles(
         "instrument": canonical_instrument,
         "granularity": granularity,
         "price": price_parameter,
+        # Older cache entries treated a short OANDA page as the end of the
+        # requested range. Keep them isolated because they may be truncated.
+        "pagination": "cover-request-end-v2",
         "start": _oanda_time(start_dt),
         "end": _oanda_time(end_dt),
     }
@@ -261,6 +267,8 @@ def load_oanda_candles(
         client = session or requests.Session()
         pages: list[dict[str, Any]] = []
         current_start = start_dt
+        requested_end = pd.Timestamp(end_dt)
+        bar_delta = _time_delta(timeframe)
         first_page = True
         for _ in range(10000):
             params = {
@@ -276,19 +284,28 @@ def load_oanda_candles(
             if not isinstance(page_candles, list):
                 raise DataSourceError("OANDA response is missing candles")
             pages.append(page)
-            if len(page_candles) < OANDA_MAX_CANDLES:
+            # A trailing incomplete candle denotes the provider's current
+            # partial interval. It cannot be used for historical research and
+            # there is no later complete candle to request.
+            if any(isinstance(candle, dict) and candle.get("complete") is False for candle in page_candles):
                 break
             last_candle = page_candles[-1] if page_candles else None
             if not isinstance(last_candle, dict) or "time" not in last_candle:
-                raise DataSourceError("OANDA response contains a malformed candle")
+                raise DataSourceError("OANDA returned no candles before the requested end")
             last_time = _utc_timestamp(last_candle["time"], "OANDA response contains an invalid candle timestamp")
-            if last_time >= pd.Timestamp(end_dt):
+            # OANDA can return fewer than ``count`` candles even when later
+            # historical candles exist. Continue until the final returned bar
+            # covers the requested end; page size alone is not a completion
+            # signal.
+            if last_time + bar_delta >= requested_end:
                 break
             # OANDA excludes the `from` candle when includeFirst=false, so
             # resume at the final returned timestamp without skipping a bar.
             next_start = last_time.to_pydatetime()
             if next_start <= current_start:
-                raise DataSourceError("OANDA pagination made no forward progress")
+                # Retain malformed page data so the canonical validator can
+                # report duplicate or unsorted timestamps to the caller.
+                break
             current_start = next_start
             first_page = False
         else:
@@ -324,6 +341,7 @@ def load_oanda_candles(
         series,
         expected_interval=timeframe,
         closed_weekdays=closed_weekdays,
+        market_calendar=market_calendar,
         raise_on_error=False,
     )
     series.quality_issues.extend(issues)

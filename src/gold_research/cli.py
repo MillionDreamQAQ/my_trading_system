@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .config import ConfigError, load_config, validate_oanda_xauusd_config
 from .data.loader import DataSourceError, OANDA_XAU_USD, load_oanda_candles
+from .dashboard import DashboardDataStore, build_dashboard_payload, serve_dashboard
 from .domain import InstrumentMetadata
 from .reporting.artifacts import write_run_artifacts
 from .research import run_research
@@ -30,6 +31,20 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--oanda-cache-dir", default="data/cache/oanda")
     run_parser.add_argument("--strategy", choices=["entry_point_2", "entry_point_3"], required=True)
     run_parser.add_argument("--output-root", default="runs")
+
+    dashboard_parser = subparsers.add_parser("dashboard", help="serve a local historical chart dashboard")
+    dashboard_parser.add_argument("--config", required=True)
+    dashboard_parser.add_argument("--start", required=True, help="UTC ISO start of the displayed evaluation window")
+    dashboard_parser.add_argument("--end", required=True, help="UTC ISO end of the displayed evaluation window")
+    dashboard_parser.add_argument("--warmup-start", help="optional UTC ISO start used only for indicator warm-up")
+    dashboard_parser.add_argument("--oanda-cache-dir", default="data/cache/oanda")
+    dashboard_parser.add_argument(
+        "--allow-data-gaps",
+        action="store_true",
+        help="display cached or downloaded gaps as warnings instead of blocking the dashboard",
+    )
+    dashboard_parser.add_argument("--host", default="127.0.0.1")
+    dashboard_parser.add_argument("--port", type=int, default=8000)
     return parser
 
 
@@ -63,14 +78,38 @@ def _load_oanda(args, config):
         OANDA_XAU_USD,
         config.timeframes.base,
         _oanda_metadata(config),
-        start=_parse_utc(args.start),
+        start=_parse_utc(getattr(args, "warmup_start", None) or args.start),
         end=_parse_utc(args.end),
         token=token,
         cache_dir=args.oanda_cache_dir,
         closed_weekdays=config.data_quality.closed_weekdays,
-        missing_bar_policy=config.data_quality.missing_bar_policy,
+        market_calendar=config.data_quality.market_calendar,
+        missing_bar_policy="ignore" if getattr(args, "allow_data_gaps", False) else config.data_quality.missing_bar_policy,
         max_gap_bars=config.data_quality.max_gap_bars,
     )[:2]
+
+
+def _dashboard_loader(args, config):
+    """Create the dashboard's on-demand OANDA loader without exposing its token."""
+
+    token = os.environ.get("OANDA_API_TOKEN", "").strip() or None
+
+    def load_window(start: datetime, end: datetime):
+        return load_oanda_candles(
+            OANDA_XAU_USD,
+            config.timeframes.base,
+            _oanda_metadata(config),
+            start=start,
+            end=end,
+            token=token,
+            cache_dir=args.oanda_cache_dir,
+            closed_weekdays=config.data_quality.closed_weekdays,
+            market_calendar=config.data_quality.market_calendar,
+            missing_bar_policy="ignore" if args.allow_data_gaps else config.data_quality.missing_bar_policy,
+            max_gap_bars=config.data_quality.max_gap_bars,
+        )[0]
+
+    return load_window
 
 
 def _print_config(config) -> None:
@@ -86,6 +125,34 @@ def main(argv: list[str] | None = None) -> int:
             _print_config(config)
             return 0
         series, fingerprint = _load_oanda(args, config)
+        if args.command == "dashboard":
+            # The dashboard remains read-only and preserves gap warnings so users
+            # can inspect data around known market closures.
+            payload = build_dashboard_payload(
+                series,
+                config,
+                display_start=_parse_utc(args.start),
+                display_end=_parse_utc(args.end),
+            )
+            _print_config(config)
+            print(json.dumps({"data_fingerprint": fingerprint, "quality_issues": payload["quality_issues"]}, ensure_ascii=False))
+            serve_dashboard(
+                payload,
+                args.host,
+                args.port,
+                base=series,
+                config=config,
+                data_store=DashboardDataStore(
+                    series,
+                    config,
+                    _dashboard_loader(args, config),
+                    initial_start=_parse_utc(args.warmup_start or args.start),
+                    initial_end=_parse_utc(args.end),
+                ),
+                default_display_start=_parse_utc(args.start),
+                default_display_end=_parse_utc(args.end),
+            )
+            return 0
         run = run_research(
             series,
             config,

@@ -10,9 +10,9 @@ tick_size = 0.01
 point_value = 1.0
 
 [timeframes]
-base = "15min"
-medium = "1h"
-large = "4h"
+base = "1min"
+medium = "5min"
+large = "30min"
 timezone = "UTC"
 
 [strategy]
@@ -51,4 +51,5 @@ require_explicit_costs = true
 [data_quality]
 missing_bar_policy = "warn"
 max_gap_bars = 16
-closed_weekdays = [5, 6]
+closed_weekdays = [5]
+market_calendar = "oanda_xau_usd"

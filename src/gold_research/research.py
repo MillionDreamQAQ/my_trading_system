@@ -167,6 +167,7 @@ def run_research(
         base,
         expected_interval=config.timeframes.base,
         closed_weekdays=config.data_quality.closed_weekdays,
+        market_calendar=config.data_quality.market_calendar,
         raise_on_error=False,
     )
     base.quality_issues.extend(issue for issue in issues if issue not in base.quality_issues)

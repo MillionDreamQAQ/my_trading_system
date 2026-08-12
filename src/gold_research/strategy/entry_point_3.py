@@ -8,6 +8,7 @@ import pandas as pd
 
 from ..config import ResearchConfig
 from ..domain import Direction, Signal
+from ..market_calendar import unexpected_missing_bar_ranges
 from .state_machine import Setup, SetupState
 
 
@@ -25,12 +26,20 @@ def _trend_ok(row: pd.Series, side: Direction) -> bool:
     return bool(row["all_up"] if side is Direction.LONG else row["all_down"])
 
 
-def _has_data_gap(frame: pd.DataFrame, index: int, base_timeframe: str) -> bool:
+def _has_data_gap(frame: pd.DataFrame, index: int, config: ResearchConfig) -> bool:
     if index == 0:
         return False
     previous = pd.Timestamp(frame.iloc[index - 1]["open_time"])
     current = pd.Timestamp(frame.iloc[index]["open_time"])
-    return current - previous > pd.Timedelta(base_timeframe)
+    return bool(
+        unexpected_missing_bar_ranges(
+            previous,
+            current,
+            pd.Timedelta(config.timeframes.base),
+            market_calendar=config.data_quality.market_calendar,
+            closed_weekdays=config.data_quality.closed_weekdays,
+        )
+    )
 
 
 def _initial_breakout(
@@ -105,7 +114,7 @@ def detect_entry_point_3(context: pd.DataFrame, config: ResearchConfig) -> Entry
                 continue
             setup = active[side]
             if setup is not None:
-                if _has_data_gap(frame, index, config.timeframes.base):
+                if _has_data_gap(frame, index, config):
                     setup.cancel(index, "data_gap")
                     completed.append(setup)
                     active[side] = None

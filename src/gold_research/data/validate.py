@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from ..domain import BarSeries, DataQualityIssue, REQUIRED_OHLC_COLUMNS
+from ..market_calendar import NO_MARKET_CALENDAR, unexpected_missing_bar_ranges
 from .normalize import _time_delta
 
 
@@ -41,25 +42,11 @@ def _issue(code: str, message: str, **kwargs: object) -> DataQualityIssue:
     return DataQualityIssue(code=code, severity="error", message=message, **kwargs)
 
 
-def _missing_bar_count(
-    previous: pd.Timestamp,
-    current: pd.Timestamp,
-    interval: pd.Timedelta,
-    closed_weekdays: set[int],
-) -> int:
-    expected = previous + interval
-    count = 0
-    while expected < current:
-        if expected.weekday() not in closed_weekdays:
-            count += 1
-        expected += interval
-    return count
-
-
 def validate_bar_series(
     series: BarSeries,
     expected_interval: str | None = None,
     closed_weekdays: tuple[int, ...] = (),
+    market_calendar: str = NO_MARKET_CALENDAR,
     raise_on_error: bool = True,
 ) -> list[DataQualityIssue]:
     """Validate timestamps, OHLC relationships, and unfilled data gaps."""
@@ -88,15 +75,20 @@ def validate_bar_series(
         close_expected = timestamps + interval
         if not frame["close_time"].eq(close_expected).all():
             issues.append(_issue("INVALID_CLOSE_TIME", "close_time must equal open_time plus the bar interval"))
-        closed = set(closed_weekdays)
         gap_rows = []
         for index in range(1, len(timestamps)):
             previous = pd.Timestamp(timestamps.iloc[index - 1])
             current = pd.Timestamp(timestamps.iloc[index])
             if current - previous > interval:
-                count = _missing_bar_count(previous, current, interval, closed)
-                if count:
-                    gap_rows.append((previous + interval, current, count))
+                gap_rows.extend(
+                    unexpected_missing_bar_ranges(
+                        previous,
+                        current,
+                        interval,
+                        market_calendar=market_calendar,
+                        closed_weekdays=closed_weekdays,
+                    )
+                )
         for start, end, count in gap_rows:
             issues.append(
                 _issue(

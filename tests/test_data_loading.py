@@ -67,6 +67,25 @@ class _FakeSession:
 
 
 class OandaDataLoadingTests(unittest.TestCase):
+    def test_oanda_supports_one_minute_candles(self) -> None:
+        start = pd.Timestamp("2026-01-01T00:00:00Z")
+        with TemporaryDirectory() as temporary:
+            session = _FakeSession([_FakeResponse({"candles": [_oanda_candle(start)]})])
+            series, _, _ = load_oanda_candles(
+                "XAU_USD",
+                "1min",
+                metadata(),
+                start=start.to_pydatetime(),
+                end=(start + pd.Timedelta(minutes=1)).to_pydatetime(),
+                token="unit-test-token",
+                base_url="https://example.test",
+                cache_dir=temporary,
+                session=session,
+            )
+
+        self.assertEqual(session.calls[0]["params"]["granularity"], "M1")
+        self.assertEqual(series.timeframe, "1min")
+
     def test_naive_timestamps_use_source_timezone_and_become_utc(self) -> None:
         frame = pd.DataFrame(
             {
@@ -123,6 +142,50 @@ class OandaDataLoadingTests(unittest.TestCase):
         gaps = [issue for issue in context.exception.issues if issue.code == "MISSING_BARS"]
         self.assertEqual(len(gaps), 1)
         self.assertEqual(gaps[0].count, 1)
+
+    def test_oanda_daily_maintenance_gap_is_accepted_by_market_calendar(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "timestamp": ["2026-08-10T20:59:00Z", "2026-08-10T22:04:00Z"],
+                "open": [100, 101],
+                "high": [101, 102],
+                "low": [99, 100],
+                "close": [100.5, 101.5],
+            }
+        )
+        series = normalize_ohlc_frame(frame, metadata(), "1min")
+
+        issues = validate_bar_series(
+            series,
+            expected_interval="1min",
+            closed_weekdays=(5,),
+            market_calendar="oanda_xau_usd",
+            raise_on_error=False,
+        )
+
+        self.assertNotIn("MISSING_BARS", {issue.code for issue in issues})
+
+    def test_oanda_market_calendar_keeps_open_market_gap_fatal(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "timestamp": ["2026-08-10T12:00:00Z", "2026-08-10T12:02:00Z"],
+                "open": [100, 101],
+                "high": [101, 102],
+                "low": [99, 100],
+                "close": [100.5, 101.5],
+            }
+        )
+        series = normalize_ohlc_frame(frame, metadata(), "1min")
+
+        with self.assertRaises(DataValidationError) as context:
+            validate_bar_series(
+                series,
+                expected_interval="1min",
+                closed_weekdays=(5,),
+                market_calendar="oanda_xau_usd",
+            )
+
+        self.assertIn("MISSING_BARS", {issue.code for issue in context.exception.issues})
 
     def test_oanda_selects_price_basis_and_discards_incomplete_candles(self) -> None:
         start = pd.Timestamp("2026-01-01T00:00:00Z")
@@ -260,6 +323,35 @@ class OandaDataLoadingTests(unittest.TestCase):
             last_first_page_timestamp.isoformat().replace("+00:00", ".000000Z"),
         )
         self.assertEqual(len(series.bars), OANDA_MAX_CANDLES + 1)
+
+    def test_oanda_continues_after_a_short_page_until_the_requested_end(self) -> None:
+        start = pd.Timestamp("2026-01-01T00:00:00Z")
+        first_page = [_oanda_candle(start + index * pd.Timedelta(minutes=15)) for index in range(3)]
+        second_page = [_oanda_candle(start + index * pd.Timedelta(minutes=15)) for index in range(3, 6)]
+        session = _FakeSession(
+            [
+                _FakeResponse({"candles": first_page}),
+                _FakeResponse({"candles": second_page}),
+            ]
+        )
+
+        with TemporaryDirectory() as temporary:
+            series, _, _ = load_oanda_candles(
+                "XAU_USD",
+                "15min",
+                metadata(),
+                start=start.to_pydatetime(),
+                end=(start + 6 * pd.Timedelta(minutes=15)).to_pydatetime(),
+                token="unit-test-token",
+                base_url="https://example.test",
+                cache_dir=temporary,
+                session=session,
+            )
+
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(session.calls[0]["params"]["includeFirst"], "true")
+        self.assertEqual(session.calls[1]["params"]["includeFirst"], "false")
+        self.assertEqual(len(series.bars), 6)
 
     def test_oanda_auth_and_rate_limit_errors_are_explicit(self) -> None:
         start = pd.Timestamp("2026-01-01T00:00:00Z")

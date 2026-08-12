@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .domain import Direction, PriceBasis
+from .market_calendar import NO_MARKET_CALENDAR, SUPPORTED_MARKET_CALENDARS
 
 
 class ConfigError(ValueError):
@@ -65,6 +66,14 @@ def _closed_weekdays(value: Any) -> tuple[int, ...]:
             raise ConfigError("data_quality.closed_weekdays must contain weekday numbers 0..6")
         result.append(day)
     return tuple(result)
+
+
+def _market_calendar(value: Any) -> str:
+    calendar = str(value).strip().lower()
+    if calendar not in SUPPORTED_MARKET_CALENDARS:
+        supported = ", ".join(sorted(SUPPORTED_MARKET_CALENDARS))
+        raise ConfigError(f"data_quality.market_calendar must be one of: {supported}")
+    return calendar
 
 
 @dataclass(frozen=True)
@@ -132,6 +141,7 @@ class DataQualityConfig:
     missing_bar_policy: str
     max_gap_bars: int
     closed_weekdays: tuple[int, ...] = ()
+    market_calendar: str = NO_MARKET_CALENDAR
 
 
 @dataclass(frozen=True)
@@ -276,6 +286,7 @@ class ResearchConfig:
                     _required(quality, "max_gap_bars", "data_quality"), "data_quality.max_gap_bars"
                 ),
                 closed_weekdays=_closed_weekdays(quality.get("closed_weekdays", [])),
+                market_calendar=_market_calendar(quality.get("market_calendar", NO_MARKET_CALENDAR)),
             ),
             direction=direction,
             strategy_version=str(raw.get("strategy", {}).get("version", "baseline-v1")),
@@ -290,6 +301,8 @@ class ResearchConfig:
             raise ConfigError("data_quality.max_gap_bars cannot be negative")
         if any(day < 0 or day > 6 for day in self.data_quality.closed_weekdays):
             raise ConfigError("data_quality.closed_weekdays must contain weekday numbers 0..6")
+        if self.data_quality.market_calendar not in SUPPORTED_MARKET_CALENDARS:
+            raise ConfigError("data_quality.market_calendar is unsupported")
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
