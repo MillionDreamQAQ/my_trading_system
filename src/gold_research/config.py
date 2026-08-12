@@ -50,6 +50,12 @@ def _boolean(value: Any, name: str) -> bool:
     return value
 
 
+def _optional_positive_float(value: Any, name: str) -> float | None:
+    if value is None:
+        return None
+    return _positive_float(value, name)
+
+
 @dataclass(frozen=True)
 class InstrumentConfig:
     symbol: str
@@ -111,6 +117,54 @@ class CostConfig:
 
 
 @dataclass(frozen=True)
+class PositionConfig:
+    """Position sizing and margin assumptions for each trade."""
+
+    lots: float | None
+    margin_per_trade: float | None
+    units_per_lot: float
+    leverage: float
+
+    def quantity_for_entry(self, entry_price: float, point_value: float) -> float:
+        """Return units sized from fixed margin, or legacy fixed lots when set."""
+
+        if self.margin_per_trade is not None:
+            return self.margin_per_trade * self.leverage / (entry_price * point_value)
+        if self.lots is None:
+            raise ConfigError("position requires margin_per_trade or lots")
+        return self.lots * self.units_per_lot
+
+    def lots_for_quantity(self, quantity: float) -> float:
+        return quantity / self.units_per_lot
+
+
+def _position_config(position: dict[str, Any]) -> PositionConfig:
+    """Parse one dashboard/research position model.
+
+    New configurations use fixed margin per trade. The optional legacy lots
+    mode remains readable so existing research configurations stay usable.
+    """
+
+    if not position:
+        return PositionConfig(lots=1.0, margin_per_trade=None, units_per_lot=1.0, leverage=1.0)
+    margin_per_trade = _optional_positive_float(
+        position.get("margin_per_trade"),
+        "position.margin_per_trade",
+    )
+    lots = _optional_positive_float(position.get("lots"), "position.lots")
+    if margin_per_trade is None and lots is None:
+        raise ConfigError("position requires margin_per_trade or lots")
+    if margin_per_trade is not None and lots is not None:
+        raise ConfigError("position.margin_per_trade and position.lots cannot both be set")
+    return PositionConfig(
+        lots=lots,
+        margin_per_trade=margin_per_trade,
+        units_per_lot=_positive_float(position.get("units_per_lot", 100.0), "position.units_per_lot"),
+        leverage=_positive_float(position.get("leverage", 20.0), "position.leverage"),
+    )
+
+
+@dataclass(frozen=True)
 class ResearchConfig:
     instrument: InstrumentConfig
     timeframes: TimeframeConfig
@@ -119,6 +173,7 @@ class ResearchConfig:
     entry_point_3: EntryPoint3Config
     risk: RiskConfig
     costs: CostConfig
+    position: PositionConfig
     direction: Direction = Direction.BOTH
     strategy_version: str = "baseline-v1"
 
@@ -131,6 +186,7 @@ class ResearchConfig:
         entry3 = _required(raw, "entry_point_3", "root")
         risk = _required(raw, "risk", "root")
         costs = _required(raw, "costs", "root")
+        position = raw.get("position", {})
         if not isinstance(instrument, dict):
             raise ConfigError("[instrument] must be a table")
         if not isinstance(timeframes, dict):
@@ -141,6 +197,8 @@ class ResearchConfig:
             raise ConfigError("entry point sections must be tables")
         if not isinstance(risk, dict) or not isinstance(costs, dict):
             raise ConfigError("risk and costs must be tables")
+        if not isinstance(position, dict):
+            raise ConfigError("position must be a table")
 
         symbol = str(_required(instrument, "symbol", "instrument")).strip()
         provider = str(_required(instrument, "provider", "instrument")).strip()
@@ -244,6 +302,7 @@ class ResearchConfig:
                 ),
                 require_explicit_costs=_boolean(costs["require_explicit_costs"], "costs.require_explicit_costs"),
             ),
+            position=_position_config(position),
             direction=direction,
             strategy_version=str(raw.get("strategy", {}).get("version", "baseline-v1")),
         )

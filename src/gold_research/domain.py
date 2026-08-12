@@ -165,6 +165,7 @@ class RunManifest:
     input_end: str
     timezone: str
     cost_model: dict[str, Any]
+    position_model: dict[str, Any] = field(default_factory=dict)
     warnings: tuple[dict[str, Any], ...] = ()
     source_metadata: dict[str, Any] = field(default_factory=dict)
     research_usable: bool = True

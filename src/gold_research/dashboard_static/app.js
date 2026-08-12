@@ -140,6 +140,12 @@ function capitalReturn(value) {
   return capital === null || value === null || value === undefined ? null : value / capital;
 }
 
+function positionSummary() {
+  const position = state.payload.metadata.position || {};
+  const margin = position.margin_per_trade === null ? "固定手数" : `$${fmtNumber(position.margin_per_trade)} 每笔`;
+  return `${margin}，${fmtNumber(position.leverage, 0)}x 杠杆`;
+}
+
 function pnlClass(value) {
   return value > 0 ? "positive" : value < 0 ? "negative" : "";
 }
@@ -326,7 +332,7 @@ function renderAnalysis() {
   byId("comparison-view").hidden = !isComparison;
   byId("single-analysis-view").hidden = isComparison;
   byId("analysis-title").textContent = isComparison ? "策略对比" : `${strategyLabel(state.strategy)} 回测分析`;
-  byId("analysis-subtitle").textContent = isComparison ? "两套策略独立回测，未合并为组合权益曲线。" : "固定 1 金衡盎司仓位；未包含点差、滑点和手续费。";
+  byId("analysis-subtitle").textContent = isComparison ? "两套策略独立回测，未合并为组合权益曲线。" : positionSummary();
   if (isComparison) {
     renderComparison();
     return;
@@ -392,6 +398,9 @@ function renderReview() {
     const pnl = byId("review-pnl");
     pnl.textContent = `${trade.net_pnl >= 0 ? "+" : ""}${fmtNumber(trade.net_pnl)}`;
     pnl.className = trade.net_pnl >= 0 ? "positive" : "negative";
+    byId("review-lots").textContent = `${fmtNumber(trade.lots, 2)} 手 (${fmtNumber(trade.quantity, 2)} 盎)`;
+    byId("review-notional").textContent = `$${fmtNumber(trade.notional_value)}`;
+    byId("review-margin").textContent = `$${fmtNumber(trade.required_margin)}`;
     byId("review-hold").textContent = `${trade.hold_bars} \u6839K\u7EBF`;
     byId("review-note").textContent = "\u56FE\u8868\u4EC5\u7A81\u51FA\u663E\u793A\u5F53\u524D\u4EA4\u6613\u7684\u7A81\u7834\u4F4D\u3001\u5165\u573A\u4F4D\u3001\u6B62\u635F\u4F4D\u548C\u6B62\u76C8\u4F4D\u3002";
   } else {
@@ -456,14 +465,34 @@ function renderRangeInputs() {
   end.value = isoInputValue(metadata.display_end);
 }
 
+function renderPositionInputs() {
+  const position = state.payload.metadata.position || {};
+  byId("margin-per-trade").value = position.margin_per_trade ?? 1000;
+  byId("position-leverage").value = position.leverage ?? 20;
+}
+
 function setRangeMessage(message = "") {
   const element = byId("range-message");
   element.hidden = !message;
   element.textContent = message;
 }
 
-async function loadPayload(start, end) {
-  const params = start && end ? `?${new URLSearchParams({ start: `${start}:00Z`, end: `${end}:00Z` })}` : "";
+function activePositionParams() {
+  return {
+    margin_per_trade: byId("margin-per-trade")?.value,
+    leverage: byId("position-leverage")?.value,
+  };
+}
+
+async function loadPayload(start, end, position = activePositionParams()) {
+  const search = new URLSearchParams();
+  if (start && end) {
+    search.set("start", `${start}:00Z`);
+    search.set("end", `${end}:00Z`);
+  }
+  if (position.margin_per_trade) search.set("margin_per_trade", position.margin_per_trade);
+  if (position.leverage) search.set("leverage", position.leverage);
+  const params = search.size ? `?${search}` : "";
   const response = await fetch(`/api/dashboard${params}`, { cache: "no-store" });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || `\u770B\u677F\u6570\u636E\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09\u3002`);
@@ -483,6 +512,32 @@ async function applyRange(event) {
     clearSelection();
     renderMetadata();
     renderRangeInputs();
+    renderPositionInputs();
+    selectFirstInspectable();
+    renderAll();
+  } catch (error) {
+    setRangeMessage(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function applyPosition(event) {
+  event.preventDefault();
+  const margin = Number(byId("margin-per-trade").value);
+  const leverage = Number(byId("position-leverage").value);
+  if (!Number.isFinite(margin) || margin <= 0 || !Number.isFinite(leverage) || leverage <= 0) {
+    setRangeMessage("每次交易金额和杠杆必须为正数。");
+    return;
+  }
+  const button = byId("apply-position");
+  button.disabled = true;
+  setRangeMessage("");
+  try {
+    state.payload = await loadPayload();
+    clearSelection();
+    renderMetadata();
+    renderPositionInputs();
     selectFirstInspectable();
     renderAll();
   } catch (error) {
@@ -493,11 +548,13 @@ async function applyRange(event) {
 }
 
 async function start() {
-  state.payload = await loadPayload();
+  state.payload = await loadPayload(null, null, {});
   renderMetadata();
   renderRangeInputs();
+  renderPositionInputs();
   selectFirstInspectable();
   byId("date-range-form").addEventListener("submit", applyRange);
+  byId("position-form").addEventListener("submit", applyPosition);
   byId("initial-capital").addEventListener("input", () => renderAnalysis());
   document.querySelectorAll("input[name=timeframe]").forEach((input) => input.addEventListener("change", () => { state.timeframe = input.value; renderAll(); }));
   document.querySelectorAll("input[name=strategy]").forEach((input) => input.addEventListener("change", () => { state.strategy = input.value; selectFirstInspectable(); renderAll(); }));

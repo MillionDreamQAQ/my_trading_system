@@ -124,6 +124,9 @@
                   <div><dt>&#x6B62;&#x76C8;</dt><dd id="review-target">-</dd></div>
                   <div><dt>&#x51FA;&#x573A;</dt><dd id="review-exit">-</dd></div>
                   <div><dt>&#x76C8;&#x4E8F;</dt><dd id="review-pnl">-</dd></div>
+                  <div><dt>&#x624B;&#x6570;</dt><dd id="review-lots">-</dd></div>
+                  <div><dt>&#x540D;&#x4E49;&#x91D1;&#x989D;</dt><dd id="review-notional">-</dd></div>
+                  <div><dt>&#x6240;&#x9700;&#x4FDD;&#x8BC1;&#x91D1;</dt><dd id="review-margin">-</dd></div>
                   <div><dt>&#x6301;&#x4ED3;K&#x7EBF;</dt><dd id="review-hold">-</dd></div>
                 </dl>
               </div>
@@ -154,6 +157,17 @@
             <h2 id="analysis-title">&#x7B56;&#x7565;&#x7ED3;&#x679C;&#x89E3;&#x8BFB;</h2>
           </div>
           <div class="analysis-settings">
+            <form id="position-form" class="position-controls" aria-label="&#x56DE;&#x6D4B;&#x4ED3;&#x4F4D;&#x8BBE;&#x7F6E;">
+              <label class="capital-control">
+                <span>&#x6BCF;&#x6B21;&#x4EA4;&#x6613;&#x91D1;&#x989D;&#xFF08;USD&#xFF09;</span>
+                <input id="margin-per-trade" type="number" min="100" step="100" inputmode="decimal" value="1000" required>
+              </label>
+              <label class="capital-control">
+                <span>&#x6760;&#x6746;&#xFF08;x&#xFF09;</span>
+                <input id="position-leverage" type="number" min="1" step="1" inputmode="decimal" value="20" required>
+              </label>
+              <button id="apply-position" type="submit">&#x5E94;&#x7528;</button>
+            </form>
             <label class="capital-control">
               <span>&#x8D77;&#x59CB;&#x8D44;&#x91D1;&#xFF08;USD&#xFF09;</span>
               <input id="initial-capital" type="number" min="1" step="100" inputmode="decimal" value="10000" aria-label="&#x8D77;&#x59CB;&#x8D44;&#x91D1;&#xFF08;USD&#xFF09;">

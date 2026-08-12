@@ -48,7 +48,7 @@ def write_run_artifacts(run: ResearchRun, output_root: str | Path = "runs") -> P
         (trade.to_record() for trade in run.backtest.trades),
         [
             "strategy_id", "side", "signal_time", "entry_time", "exit_time", "entry_price", "exit_price",
-            "quantity", "stop_price", "target_price", "exit_reason", "gross_pnl", "spread_cost",
+            "lots", "quantity", "notional_value", "required_margin", "stop_price", "target_price", "exit_reason", "gross_pnl", "spread_cost",
             "slippage_cost", "commission", "net_pnl", "r_multiple", "mfe", "mae", "hold_bars",
         ],
     )

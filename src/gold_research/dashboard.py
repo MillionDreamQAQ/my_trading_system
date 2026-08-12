@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+from dataclasses import replace
 from datetime import datetime
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -148,7 +150,13 @@ class DashboardDataStore:
         series.quality_issues.extend(issues)
         return series
 
-    def payload_for(self, display_start: datetime, display_end: datetime) -> dict[str, Any]:
+    def payload_for(
+        self,
+        display_start: datetime,
+        display_end: datetime,
+        *,
+        config: ResearchConfig | None = None,
+    ) -> dict[str, Any]:
         """Return a fresh payload, downloading only uncached OANDA intervals."""
 
         start = _as_utc(display_start)
@@ -159,7 +167,7 @@ class DashboardDataStore:
         with self._lock:
             self._load_missing(calculation_start, end)
             base = self._series_for(calculation_start, end)
-        return build_dashboard_payload(base, self._config, display_start=start, display_end=end)
+        return build_dashboard_payload(base, config or self._config, display_start=start, display_end=end)
 
 
 def _as_utc(value: datetime) -> pd.Timestamp:
@@ -167,6 +175,35 @@ def _as_utc(value: datetime) -> pd.Timestamp:
     if timestamp.tzinfo is None:
         raise ValueError("dashboard dates must be timezone-aware")
     return timestamp.tz_convert("UTC")
+
+
+def _dashboard_config_for_position(
+    config: ResearchConfig,
+    margin_per_trade: str | None,
+    leverage: str | None,
+) -> ResearchConfig:
+    """Apply optional dashboard-only sizing values without changing the TOML."""
+
+    if margin_per_trade is None and leverage is None:
+        return config
+
+    def positive_number(value: str | None, fallback: float | None, name: str) -> float:
+        candidate = fallback if value is None else float(value)
+        if candidate is None or not math.isfinite(candidate) or candidate <= 0:
+            raise ValueError(f"{name} must be a positive number")
+        return candidate
+
+    margin = positive_number(margin_per_trade, config.position.margin_per_trade, "margin_per_trade")
+    active_leverage = positive_number(leverage, config.position.leverage, "leverage")
+    return replace(
+        config,
+        position=replace(
+            config.position,
+            lots=None,
+            margin_per_trade=margin,
+            leverage=active_leverage,
+        ),
+    )
 
 
 def _target_series(series: BarSeries, start: pd.Timestamp, end: pd.Timestamp) -> BarSeries:
@@ -233,6 +270,10 @@ def _trade_record(trade: Any) -> dict[str, Any]:
         "exit_time": _unix_time(trade.exit_time),
         "entry_price": trade.entry_price,
         "exit_price": trade.exit_price,
+        "lots": trade.lots,
+        "quantity": trade.quantity,
+        "notional_value": trade.notional_value,
+        "required_margin": trade.required_margin,
         "stop_price": trade.stop_price,
         "target_price": trade.target_price,
         "exit_reason": trade.exit_reason,
@@ -338,6 +379,8 @@ def build_backtest_analysis(
             "average_hold_bars": _ratio(sum(trade.hold_bars for trade in ordered), len(ordered)),
             "largest_win": largest_win,
             "largest_loss": largest_loss,
+            "max_notional_value": max((float(getattr(trade, "notional_value", 0.0)) for trade in ordered), default=0.0),
+            "max_required_margin": max((float(getattr(trade, "required_margin", 0.0)) for trade in ordered), default=0.0),
             "max_consecutive_wins": longest_win_streak,
             "max_consecutive_losses": longest_loss_streak,
             "equity_curve": equity_curve,
@@ -455,6 +498,7 @@ def build_dashboard_payload(
             },
             "risk": config.to_dict()["risk"],
             "costs": config.to_dict()["costs"],
+            "position": config.to_dict()["position"],
         },
         "quality_issues": [issue.to_dict() for issue in base.quality_issues],
         "series": {
@@ -484,20 +528,28 @@ class _DashboardHandler(SimpleHTTPRequestHandler):
     def _requested_payload(self, query: dict[str, list[str]]) -> dict[str, Any]:
         start = query.get("start", [None])[0]
         end = query.get("end", [None])[0]
-        if start is None and end is None:
+        margin_per_trade = query.get("margin_per_trade", [None])[0]
+        leverage = query.get("leverage", [None])[0]
+        active_config = _dashboard_config_for_position(self.server.config, margin_per_trade, leverage)
+        if start is None and end is None and margin_per_trade is None and leverage is None:
             return self.server.payload
+        if start is None:
+            start = self.server.default_display_start.isoformat()
+        if end is None:
+            end = self.server.default_display_end.isoformat()
         if not start or not end:
             raise ValueError("both start and end are required")
         if self.server.data_store is not None:
             return self.server.data_store.payload_for(
                 _as_utc(pd.Timestamp(start)),
                 _as_utc(pd.Timestamp(end)),
+                config=active_config,
             )
-        if self.server.base is None or self.server.config is None:
+        if self.server.base is None:
             raise ValueError("dashboard range selection is unavailable")
         return build_dashboard_payload(
             self.server.base,
-            self.server.config,
+            active_config,
             display_start=_as_utc(pd.Timestamp(start)),
             display_end=_as_utc(pd.Timestamp(end)),
         )

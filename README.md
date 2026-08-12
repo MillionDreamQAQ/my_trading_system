@@ -56,6 +56,19 @@ python -m gold_research.cli dashboard --config configs/xauusd_baseline.toml --wa
 
 此前在聊天中暴露过的 OANDA token 应立即在 OANDA 后台撤销并重新生成。新的 token 只应通过 `OANDA_API_TOKEN` 环境变量提供。
 
+## 仓位与保证金
+
+回测仓位在 `[position]` 中配置：
+
+```toml
+[position]
+margin_per_trade = 1000.0
+units_per_lot = 100.0
+leverage = 20.0
+```
+
+每次交易金额是每笔使用的保证金。例如 `$1,000` 和 `20x` 杠杆代表约 `$20,000` 的名义仓位；系统按实际进场价换算黄金数量和手数。净盈亏、点差、滑点和手续费按换算后的数量计算。
+
 ## 研究边界
 
 代码测试通过只说明实现满足当前契约，不代表策略盈利或适合实盘。正式研究仍应按时间切分训练、验证和样本外区间，并在不同成本假设下比较结果。

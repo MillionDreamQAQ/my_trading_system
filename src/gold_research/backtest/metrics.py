@@ -24,6 +24,8 @@ def summarize_trades(trades: list[Trade] | tuple[Trade, ...]) -> dict[str, Any]:
         "slippage_cost": sum(trade.slippage_cost for trade in values),
         "commission": sum(trade.commission for trade in values),
         "net_pnl": sum(net_values),
+        "max_notional_value": max((trade.notional_value for trade in values), default=0.0),
+        "max_required_margin": max((trade.required_margin for trade in values), default=0.0),
         "win_count": sum(value > 0 for value in net_values),
         "loss_count": sum(value <= 0 for value in net_values),
         "max_drawdown": max_drawdown,

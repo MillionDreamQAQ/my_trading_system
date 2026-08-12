@@ -20,7 +20,10 @@ class Trade:
     exit_time: pd.Timestamp
     entry_price: float
     exit_price: float
+    lots: float
     quantity: float
+    notional_value: float
+    required_margin: float
     stop_price: float
     target_price: float
     exit_reason: str
@@ -56,6 +59,9 @@ class _Position:
     entry_reference_price: float
     entry_price: float
     point_value: float
+    lots: float
+    quantity: float
+    leverage: float
     stop_price: float
     target_price: float
     mfe: float = 0.0
@@ -90,13 +96,15 @@ def _trade_from_position(
     exit_at_close: bool = False,
 ) -> Trade:
     side = position.signal.side
-    quantity = 1.0
+    quantity = position.quantity
     gross = _pnl(side, position.entry_reference_price, exit_reference_price, quantity) * position.point_value
     spread_cost = costs.spread * quantity * position.point_value
     slippage_cost = costs.slippage * 2 * quantity * position.point_value
     commission = costs.round_trip_cost(quantity)
     net = gross - spread_cost - slippage_cost - commission
     risk = abs(position.entry_price - position.stop_price) * quantity * position.point_value
+    notional_value = position.entry_price * quantity * position.point_value
+    required_margin = notional_value / position.leverage
     return Trade(
         strategy_id=position.signal.strategy_id,
         side=side,
@@ -105,7 +113,10 @@ def _trade_from_position(
         exit_time=pd.Timestamp(bars.iloc[exit_index]["close_time" if exit_at_close else "open_time"]),
         entry_price=position.entry_price,
         exit_price=exit_price,
+        lots=position.lots,
         quantity=quantity,
+        notional_value=notional_value,
+        required_margin=required_margin,
         stop_price=position.stop_price,
         target_price=position.target_price,
         exit_reason=reason,
@@ -164,6 +175,7 @@ def run_backtest(
                 else:
                     stop = entry_price + config.risk.stop_atr * signal.atr
                     target = entry_price - config.risk.target_atr * signal.atr
+                quantity = config.position.quantity_for_entry(entry_price, config.instrument.point_value)
                 position = _Position(
                     signal,
                     index,
@@ -171,6 +183,9 @@ def run_backtest(
                     mid_open,
                     entry_price,
                     config.instrument.point_value,
+                    config.position.lots_for_quantity(quantity),
+                    quantity,
+                    config.position.leverage,
                     stop,
                     target,
                 )

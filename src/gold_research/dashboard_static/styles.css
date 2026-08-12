@@ -123,6 +123,8 @@ h2 { margin-bottom: 0; font-size: 18px; letter-spacing: 0; }
 .analysis-band { margin-top: 18px; padding: 18px; }
 .analysis-band > .section-title { align-items: flex-start; margin-bottom: 15px; }
 .analysis-settings { align-items: flex-end; display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+.position-controls { align-items: flex-end; display: flex; flex-wrap: wrap; gap: 8px; }
+.position-controls button { height: 30px; }
 .capital-control { color: var(--muted); display: grid; font-size: 11px; font-weight: 650; gap: 3px; }
 .capital-control input { background: var(--surface); border: 1px solid var(--line); color: var(--ink); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; height: 30px; padding: 4px 7px; width: 132px; }
 .capital-control input:focus { border-color: var(--teal); outline: 2px solid var(--teal-pale); }

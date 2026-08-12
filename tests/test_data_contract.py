@@ -22,6 +22,10 @@ class ConfigContractTests(unittest.TestCase):
         self.assertEqual(config.timeframes.medium, "5min")
         self.assertEqual(config.timeframes.large, "30min")
         self.assertEqual(config.risk.max_hold_bars, 80)
+        self.assertIsNone(config.position.lots)
+        self.assertEqual(config.position.margin_per_trade, 1000.0)
+        self.assertEqual(config.position.units_per_lot, 100.0)
+        self.assertEqual(config.position.leverage, 20.0)
         self.assertTrue(config.costs.require_explicit_costs)
         self.assertEqual(len(config.fingerprint()), 64)
 
@@ -50,6 +54,10 @@ class ConfigContractTests(unittest.TestCase):
             ("instrument", "tick_size", math.nan),
             ("risk", "stop_atr", math.inf),
             ("costs", "spread_value", False),
+            ("position", "lots", 0.0),
+            ("position", "margin_per_trade", 0.0),
+            ("position", "units_per_lot", math.nan),
+            ("position", "leverage", math.inf),
         )
         for section, field, invalid in variants:
             with self.subTest(section=section, field=field, invalid=invalid):

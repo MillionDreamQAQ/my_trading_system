@@ -9,6 +9,7 @@ from gold_research.config import ResearchConfig
 from gold_research.dashboard import (
     DASHBOARD_WARMUP,
     DashboardDataStore,
+    _dashboard_config_for_position,
     build_backtest_analysis,
     build_dashboard_payload,
     dashboard_error_message,
@@ -157,6 +158,16 @@ class DashboardTests(unittest.TestCase):
 
         self.assertIn("OANDA_API_TOKEN", message)
         self.assertIn("重启", message)
+
+    def test_dashboard_position_values_override_only_the_requested_payload(self) -> None:
+        config = _config()
+
+        updated = _dashboard_config_for_position(config, "1000", "20")
+
+        self.assertEqual(updated.position.margin_per_trade, 1000.0)
+        self.assertEqual(updated.position.leverage, 20.0)
+        self.assertEqual(config.position.lots, 1.0)
+        self.assertEqual(config.position.leverage, 1.0)
 
     def test_backtest_analysis_reports_equity_and_trade_attribution(self) -> None:
         trades = [

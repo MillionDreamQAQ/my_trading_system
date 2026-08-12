@@ -47,3 +47,8 @@ slippage_model = "fixed"
 slippage_value = 0.0
 commission_per_unit = 0.0
 require_explicit_costs = true
+
+[position]
+margin_per_trade = 1000.0
+units_per_lot = 100.0
+leverage = 20.0

@@ -221,6 +221,7 @@ def run_research(
         input_end=input_end,
         timezone=config.timeframes.timezone,
         cost_model=config.to_dict()["costs"],
+        position_model=config.to_dict()["position"],
         warnings=tuple(issue.to_dict() for issue in warnings),
         source_metadata=base.metadata.to_dict(),
         research_usable=source_is_usable,

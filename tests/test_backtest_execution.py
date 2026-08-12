@@ -11,7 +11,14 @@ from gold_research.data.normalize import normalize_ohlc_frame
 from gold_research.domain import Direction, InstrumentMetadata, PriceBasis, Signal
 
 
-def _config(spread: float = 0.0, slippage: float = 0.0, max_hold_bars: int = 80) -> ResearchConfig:
+def _config(
+    spread: float = 0.0,
+    slippage: float = 0.0,
+    max_hold_bars: int = 80,
+    lots: float = 1.0,
+    units_per_lot: float = 1.0,
+    leverage: float = 1.0,
+) -> ResearchConfig:
     return ResearchConfig.from_mapping(
         {
             "instrument": {"symbol": "XAUUSD", "provider": "test", "price_basis": "mid", "timezone": "UTC", "point_value": 1.0},
@@ -26,6 +33,7 @@ def _config(spread: float = 0.0, slippage: float = 0.0, max_hold_bars: int = 80)
                 "slippage_model": "fixed", "slippage_value": slippage,
                 "commission_per_unit": 0.0, "require_explicit_costs": True,
             },
+            "position": {"lots": lots, "units_per_lot": units_per_lot, "leverage": leverage},
         }
     )
 
@@ -89,6 +97,45 @@ class BacktestExecutionTests(unittest.TestCase):
         self.assertLess(costly.trades[0].net_pnl, zero.trades[0].net_pnl)
         self.assertGreater(costly.trades[0].spread_cost, 0)
         self.assertGreater(costly.trades[0].slippage_cost, 0)
+
+    def test_position_size_scales_pnl_and_costs_while_leverage_sets_margin(self) -> None:
+        bars = _bars([(100, 100.5, 99.5, 100), (102, 107, 101.5, 106), (102.5, 103, 102, 102.5)])
+
+        result = run_backtest(
+            bars,
+            [_signal(0)],
+            _config(spread=0.4, slippage=0.1, lots=2.0, units_per_lot=100.0, leverage=50.0),
+        )
+
+        trade = result.trades[0]
+        self.assertEqual(trade.lots, 2.0)
+        self.assertEqual(trade.quantity, 200.0)
+        self.assertAlmostEqual(trade.gross_pnl, 900.0)
+        self.assertAlmostEqual(trade.spread_cost, 80.0)
+        self.assertAlmostEqual(trade.slippage_cost, 40.0)
+        self.assertAlmostEqual(trade.notional_value, 20460.0)
+        self.assertAlmostEqual(trade.required_margin, 409.2)
+
+    def test_margin_amount_and_leverage_size_the_position_at_entry(self) -> None:
+        raw = {
+            "instrument": {"symbol": "XAUUSD", "provider": "test", "price_basis": "mid", "timezone": "UTC", "point_value": 1.0},
+            "timeframes": {"base": "15min", "medium": "1h", "large": "4h", "timezone": "UTC"},
+            "strategy": {"direction": "both"},
+            "trend": {"ema_fast": 2, "ema_slow": 3, "slope_lookback": 1},
+            "entry_point_2": {"enabled": True, "breakout_lookback": 3},
+            "entry_point_3": {"enabled": True, "pullback_min_atr": 0.5, "pullback_min_bars": 2, "max_setup_bars": 30},
+            "risk": {"atr_period": 2, "stop_atr": 2.0, "target_atr": 4.0, "max_hold_bars": 80},
+            "costs": {"spread_model": "fixed", "spread_value": 0.0, "slippage_model": "fixed", "slippage_value": 0.0, "commission_per_unit": 0.0, "require_explicit_costs": True},
+            "position": {"margin_per_trade": 1000.0, "units_per_lot": 100.0, "leverage": 20.0},
+        }
+        bars = _bars([(100, 100.5, 99.5, 100), (2000, 2010, 1999, 2008), (2008, 2009, 2007, 2008)])
+
+        trade = run_backtest(bars, [_signal(0)], ResearchConfig.from_mapping(raw)).trades[0]
+
+        self.assertAlmostEqual(trade.notional_value, 20000.0)
+        self.assertAlmostEqual(trade.required_margin, 1000.0)
+        self.assertAlmostEqual(trade.quantity, 10.0)
+        self.assertAlmostEqual(trade.lots, 0.1)
 
     def test_stop_has_priority_when_both_levels_are_touched(self) -> None:
         bars = _bars([(100, 100.5, 99.5, 100), (100, 105, 95, 100), (100, 100, 100, 100)])
