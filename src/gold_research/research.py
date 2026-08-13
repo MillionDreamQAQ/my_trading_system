@@ -15,6 +15,7 @@ from pandas.api.types import is_numeric_dtype
 from .backtest.execution import BacktestResult, run_backtest
 from .backtest.metrics import summarize_trades
 from .config import ResearchConfig, validate_oanda_xauusd_config
+from .data.fingerprint import fingerprint_bar_series
 from .data.resample import resample_bars
 from .data.validate import DataValidationError, validate_bar_series
 from .domain import BarSeries, DataQualityIssue, RunManifest, Signal
@@ -57,11 +58,7 @@ def fingerprint_code(root: str | Path) -> str:
 
 
 def fingerprint_bars(series: BarSeries) -> str:
-    digest = hashlib.sha256()
-    digest.update(json.dumps(series.metadata.to_dict(), sort_keys=True).encode("utf-8"))
-    digest.update(series.timeframe.encode("utf-8"))
-    digest.update(series.bars.to_csv(index=False, date_format="%Y-%m-%dT%H:%M:%S%z").encode("utf-8"))
-    return digest.hexdigest()
+    return fingerprint_bar_series(series)
 
 
 def _stable_run_id(

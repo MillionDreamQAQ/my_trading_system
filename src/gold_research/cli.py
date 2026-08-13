@@ -77,7 +77,7 @@ def _parse_utc(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _load_oanda(args, config):
+def _load_oanda(args, config, *, compute_digest: bool = True):
     token = os.environ.get("OANDA_API_TOKEN", "").strip() or None
     return load_oanda_candles(
         OANDA_XAU_USD,
@@ -87,6 +87,7 @@ def _load_oanda(args, config):
         end=_parse_utc(args.end),
         token=token,
         database_path=args.oanda_database,
+        compute_digest=compute_digest,
     )[:2]
 
 
@@ -104,6 +105,7 @@ def _dashboard_loader(args, config):
             end=end,
             token=token,
             database_path=args.oanda_database,
+            compute_digest=False,
         )[0]
 
     return load_window
@@ -121,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "validate-config":
             _print_config(config)
             return 0
-        series, fingerprint = _load_oanda(args, config)
+        series, fingerprint = _load_oanda(args, config, compute_digest=args.command != "dashboard")
         if args.command == "dashboard":
             # The dashboard remains read-only and preserves gap warnings so users
             # can inspect data around known market closures.

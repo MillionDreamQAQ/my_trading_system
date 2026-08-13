@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 from urllib.parse import quote
 
 import pandas as pd
 import requests
 
 from ..domain import BarSeries, InstrumentMetadata, PriceBasis
+from .fingerprint import fingerprint_bar_series
 from .normalize import _time_delta, normalize_ohlc_frame
 from .validate import DataValidationError, validate_bar_series
 
@@ -298,11 +298,7 @@ def _read_oanda_frame(
 
 
 def _series_digest(series: BarSeries) -> str:
-    digest = hashlib.sha256()
-    digest.update(json.dumps(series.metadata.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8"))
-    digest.update(series.timeframe.encode("utf-8"))
-    digest.update(series.bars.to_csv(index=False, date_format="%Y-%m-%dT%H:%M:%S%z").encode("utf-8"))
-    return digest.hexdigest()
+    return fingerprint_bar_series(series)
 
 
 def _oanda_page(
@@ -420,6 +416,7 @@ def _oanda_metadata(
     return InstrumentMetadata(**values)
 
 
+@overload
 def load_oanda_candles(
     instrument: str,
     timeframe: str,
@@ -432,7 +429,41 @@ def load_oanda_candles(
     database_path: str | Path = "data/cache/oanda.sqlite3",
     timeout: float = 30.0,
     session: requests.Session | None = None,
-) -> tuple[BarSeries, str, Path]:
+    compute_digest: Literal[True] = True,
+) -> tuple[BarSeries, str, Path]: ...
+
+
+@overload
+def load_oanda_candles(
+    instrument: str,
+    timeframe: str,
+    metadata: InstrumentMetadata,
+    *,
+    start: datetime,
+    end: datetime,
+    token: str | None = None,
+    base_url: str = "https://api-fxpractice.oanda.com",
+    database_path: str | Path = "data/cache/oanda.sqlite3",
+    timeout: float = 30.0,
+    session: requests.Session | None = None,
+    compute_digest: Literal[False],
+) -> tuple[BarSeries, None, Path]: ...
+
+
+def load_oanda_candles(
+    instrument: str,
+    timeframe: str,
+    metadata: InstrumentMetadata,
+    *,
+    start: datetime,
+    end: datetime,
+    token: str | None = None,
+    base_url: str = "https://api-fxpractice.oanda.com",
+    database_path: str | Path = "data/cache/oanda.sqlite3",
+    timeout: float = 30.0,
+    session: requests.Session | None = None,
+    compute_digest: bool = True,
+) -> tuple[BarSeries, str | None, Path]:
     """Load complete OANDA XAU_USD candles with deterministic pagination.
 
     The adapter calls only OANDA's read-only candle endpoint. The API token is
@@ -595,6 +626,7 @@ def load_oanda_candles(
         series.quality_issues.extend(issues)
         if issues:
             raise DataValidationError(issues)
-        return series, _series_digest(series), database_file
+        digest = _series_digest(series) if compute_digest else None
+        return series, digest, database_file
     finally:
         connection.close()
