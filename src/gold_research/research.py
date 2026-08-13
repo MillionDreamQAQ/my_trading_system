@@ -17,7 +17,7 @@ from .data.resample import resample_bars
 from .data.validate import DataValidationError, validate_bar_series
 from .domain import BarSeries, DataQualityIssue, RunManifest, Signal
 from .strategy.entry_point_2 import detect_entry_point_2
-from .strategy.entry_point_3 import EntryPoint3Result, detect_entry_point_3
+from .strategy.entry_point_3 import EntryPoint3Result
 from .strategy.timeframe_context import build_timeframe_context
 
 
@@ -166,8 +166,10 @@ def run_research(
 ) -> ResearchRun:
     """Run one strategy with one data slice and one cost configuration."""
 
-    if strategy_id not in {"entry_point_2", "entry_point_3"}:
-        raise ValueError("strategy_id must be entry_point_2 or entry_point_3")
+    if strategy_id == "entry_point_3":
+        raise ValueError("entry_point_3 research is temporarily disabled")
+    if strategy_id != "entry_point_2":
+        raise ValueError("strategy_id must be entry_point_2")
     _validate_research_contract(base, config)
     issues = validate_bar_series(
         base,
@@ -189,11 +191,7 @@ def run_research(
     data_hash = data_fingerprint or fingerprint_bars(base)
     code_hash = fingerprint_code(code_root or Path(__file__).resolve().parent)
     setup_result = None
-    if strategy_id == "entry_point_2":
-        signals = tuple(detect_entry_point_2(context, config))
-    else:
-        setup_result = detect_entry_point_3(context, config)
-        signals = setup_result.signals
+    signals = tuple(detect_entry_point_2(context, config))
     backtest = run_backtest(base, signals, config)
     metrics = summarize_trades(backtest.trades)
     metrics["signal_count"] = len(signals)

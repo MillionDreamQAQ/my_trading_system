@@ -29,18 +29,28 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--start", required=True, help="UTC ISO start for OANDA XAU_USD")
     run_parser.add_argument("--end", required=True, help="UTC ISO end for OANDA XAU_USD")
     run_parser.add_argument("--oanda-cache-dir", default="data/cache/oanda")
-    run_parser.add_argument("--strategy", choices=["entry_point_2", "entry_point_3"], required=True)
+    run_parser.add_argument("--strategy", choices=["entry_point_2"], required=True)
     run_parser.add_argument("--output-root", default="runs")
 
     dashboard_parser = subparsers.add_parser("dashboard", help="serve a local historical chart dashboard")
     dashboard_parser.add_argument("--config", required=True)
     dashboard_parser.add_argument("--start", required=True, help="UTC ISO start of the displayed evaluation window")
-    dashboard_parser.add_argument("--end", required=True, help="UTC ISO end of the displayed evaluation window")
+    dashboard_parser.add_argument(
+        "--end",
+        default=_default_dashboard_end(),
+        help="UTC ISO end of the displayed evaluation window (default: current UTC time)",
+    )
     dashboard_parser.add_argument("--warmup-start", help="optional UTC ISO start used only for indicator warm-up")
     dashboard_parser.add_argument("--oanda-cache-dir", default="data/cache/oanda")
     dashboard_parser.add_argument("--host", default="127.0.0.1")
     dashboard_parser.add_argument("--port", type=int, default=8000)
     return parser
+
+
+def _default_dashboard_end() -> str:
+    """Return the current UTC minute for a dashboard's default end."""
+
+    return datetime.now(timezone.utc).replace(second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _oanda_metadata(config) -> InstrumentMetadata:

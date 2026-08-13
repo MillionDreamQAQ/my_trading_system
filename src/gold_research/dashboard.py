@@ -23,12 +23,11 @@ from .data.resample import resample_bars
 from .data.validate import DataValidationError, validate_bar_series
 from .domain import BarSeries, Signal
 from .strategy.entry_point_2 import detect_entry_point_2
-from .strategy.entry_point_3 import detect_entry_point_3
 from .strategy.indicators import add_indicators, trend_state
 from .strategy.timeframe_context import build_timeframe_context
 
 STATIC_DIRECTORY = Path(__file__).with_name("dashboard_static")
-SUPPORTED_STRATEGIES = ("entry_point_2", "entry_point_3")
+SUPPORTED_STRATEGIES = ("entry_point_2",)
 # The slowest configured indicator is calculated on 30-minute bars. Seven
 # calendar days provides enough completed bars for its initial state, including
 # the normal OANDA maintenance and weekend closures.
@@ -181,10 +180,11 @@ def _dashboard_config_for_position(
     config: ResearchConfig,
     margin_per_trade: str | None,
     leverage: str | None,
+    max_positions: str | None = None,
 ) -> ResearchConfig:
     """Apply optional dashboard-only sizing values without changing the TOML."""
 
-    if margin_per_trade is None and leverage is None:
+    if margin_per_trade is None and leverage is None and max_positions is None:
         return config
 
     def positive_number(value: str | None, fallback: float | None, name: str) -> float:
@@ -195,6 +195,12 @@ def _dashboard_config_for_position(
 
     margin = positive_number(margin_per_trade, config.position.margin_per_trade, "margin_per_trade")
     active_leverage = positive_number(leverage, config.position.leverage, "leverage")
+    try:
+        active_max_positions = config.position.max_positions if max_positions is None else int(max_positions)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_positions must be a positive integer") from exc
+    if active_max_positions <= 0 or (max_positions is not None and str(active_max_positions) != str(max_positions)):
+        raise ValueError("max_positions must be a positive integer")
     return replace(
         config,
         position=replace(
@@ -202,6 +208,7 @@ def _dashboard_config_for_position(
             lots=None,
             margin_per_trade=margin,
             leverage=active_leverage,
+            max_positions=active_max_positions,
         ),
     )
 
@@ -363,7 +370,11 @@ def build_backtest_analysis(
         longest_loss_streak = max(longest_loss_streak, current_loss_streak)
         equity += value
         exit_time = pd.Timestamp(trade.exit_time)
-        equity_curve.append({"time": _unix_time(exit_time), "value": equity})
+        chart_time = _unix_time(exit_time)
+        if equity_curve and equity_curve[-1]["time"] == chart_time:
+            equity_curve[-1]["value"] = equity
+        else:
+            equity_curve.append({"time": chart_time, "value": equity})
         daily_key = exit_time.strftime("%Y-%m-%d")
         daily_summary = daily_pnl.setdefault(daily_key, {"net_pnl": 0.0, "trade_count": 0})
         daily_summary["net_pnl"] = float(daily_summary["net_pnl"]) + value
@@ -446,10 +457,7 @@ def build_dashboard_payload(
     large_frame = _target_frame(_annotated_frame(large, config), start, end)
     strategies: dict[str, Any] = {}
     for strategy_id in SUPPORTED_STRATEGIES:
-        if strategy_id == "entry_point_2":
-            detected = detect_entry_point_2(context, config)
-        else:
-            detected = list(detect_entry_point_3(context, config).signals)
+        detected = detect_entry_point_2(context, config)
         signals = [signal for signal in detected if start <= signal.signal_time < end]
         backtest = run_backtest(target_base, signals, config)
         metrics = summarize_trades(backtest.trades)
@@ -530,8 +538,14 @@ class _DashboardHandler(SimpleHTTPRequestHandler):
         end = query.get("end", [None])[0]
         margin_per_trade = query.get("margin_per_trade", [None])[0]
         leverage = query.get("leverage", [None])[0]
-        active_config = _dashboard_config_for_position(self.server.config, margin_per_trade, leverage)
-        if start is None and end is None and margin_per_trade is None and leverage is None:
+        max_positions = query.get("max_positions", [None])[0]
+        active_config = _dashboard_config_for_position(
+            self.server.config,
+            margin_per_trade,
+            leverage,
+            max_positions,
+        )
+        if start is None and end is None and margin_per_trade is None and leverage is None and max_positions is None:
             return self.server.payload
         if start is None:
             start = self.server.default_display_start.isoformat()

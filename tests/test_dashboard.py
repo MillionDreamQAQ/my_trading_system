@@ -77,6 +77,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(payload["metadata"]["trend"]["ema_slow"], 3)
         self.assertIn("ema_fast", payload["series"]["1min"][0])
         self.assertIn("trend", payload["series"]["30min"][0])
+        self.assertEqual(set(payload["strategies"]), {"entry_point_2"})
         for strategy in payload["strategies"].values():
             self.assertIn("1min", strategy["signals"])
             self.assertIn("30min", strategy["trades"])
@@ -162,12 +163,17 @@ class DashboardTests(unittest.TestCase):
     def test_dashboard_position_values_override_only_the_requested_payload(self) -> None:
         config = _config()
 
-        updated = _dashboard_config_for_position(config, "1000", "20")
+        updated = _dashboard_config_for_position(config, "1000", "20", "2")
 
         self.assertEqual(updated.position.margin_per_trade, 1000.0)
         self.assertEqual(updated.position.leverage, 20.0)
+        self.assertEqual(updated.position.max_positions, 2)
         self.assertEqual(config.position.lots, 1.0)
         self.assertEqual(config.position.leverage, 1.0)
+
+    def test_dashboard_rejects_non_integer_max_positions(self) -> None:
+        with self.assertRaisesRegex(ValueError, "max_positions"):
+            _dashboard_config_for_position(_config(), "1000", "20", "1.5")
 
     def test_backtest_analysis_reports_equity_and_trade_attribution(self) -> None:
         trades = [
@@ -206,6 +212,24 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(analysis["daily_pnl"], [{"date": "2026-01-01", "net_pnl": 2.0, "trade_count": 2}])
         self.assertEqual(analysis["by_side"]["long"]["net_pnl"], 4.0)
         self.assertEqual(analysis["by_exit_reason"]["stop"]["net_pnl"], -2.0)
+
+    def test_backtest_analysis_merges_same_timestamp_equity_points(self) -> None:
+        exit_time = pd.Timestamp("2026-01-01T00:10:00Z")
+        trades = [
+            type("Trade", (), {"net_pnl": 4.0, "exit_time": exit_time, "hold_bars": 3, "side": type("Side", (), {"value": "long"})(), "exit_reason": "target"})(),
+            type("Trade", (), {"net_pnl": -2.0, "exit_time": exit_time, "hold_bars": 4, "side": type("Side", (), {"value": "short"})(), "exit_reason": "stop"})(),
+            type("Trade", (), {"net_pnl": 3.0, "exit_time": pd.Timestamp("2026-01-01T00:20:00Z"), "hold_bars": 2, "side": type("Side", (), {"value": "long"})(), "exit_reason": "target"})(),
+        ]
+
+        analysis = build_backtest_analysis(trades, signal_count=3, unfilled_signal_count=0)
+
+        self.assertEqual(
+            analysis["equity_curve"],
+            [
+                {"time": int(exit_time.timestamp()), "value": 2.0},
+                {"time": int(pd.Timestamp("2026-01-01T00:20:00Z").timestamp()), "value": 5.0},
+            ],
+        )
 
 
 if __name__ == "__main__":

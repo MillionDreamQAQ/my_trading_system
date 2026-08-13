@@ -5,8 +5,10 @@ const state = {
   timeframe: "1min",
   strategy: "entry_point_2",
   chart: null,
+  chartResizeObserver: null,
   candleSeries: null,
   equityChart: null,
+  equityResizeObserver: null,
   initialCapital: 10000,
   selectedTradeId: null,
   selectedSignalId: null,
@@ -16,7 +18,7 @@ const byId = (id) => document.getElementById(id);
 const isoInputValue = (value) => value ? value.slice(0, 16) : "";
 const fmtNumber = (value, digits = 2) => Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 const fmtTime = (time) => new Date(time * 1000).toLocaleString("zh-CN", { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-const strategyLabel = (strategy) => ({ all: "\u5168\u90E8\u4FE1\u53F7", entry_point_2: "\u5165\u573A\u70B92", entry_point_3: "\u5165\u573A\u70B93" }[strategy] || strategy);
+const strategyLabel = (strategy) => ({ entry_point_2: "\u5165\u573A\u70B92" }[strategy] || strategy);
 const timeframeLabel = (timeframe) => ({ "1min": "1\u5206\u949F", "5min": "5\u5206\u949F", "30min": "30\u5206\u949F" }[timeframe] || timeframe);
 const sideLabel = (side) => ({ long: "\u505A\u591A", short: "\u505A\u7A7A" }[side] || side);
 const trendLabel = (trend) => ({ up: "\u4E0A\u6DA8", down: "\u4E0B\u8DCC", unknown: "\u672A\u77E5" }[trend] || trend);
@@ -43,7 +45,7 @@ function qualityMessage(issue) {
 }
 
 function selectedStrategies() {
-  return state.strategy === "all" ? ["entry_point_2", "entry_point_3"] : [state.strategy];
+  return ["entry_point_2"];
 }
 
 function selectedData() {
@@ -114,7 +116,7 @@ function aggregateMetrics() {
 }
 
 function selectedAnalysis() {
-  return state.strategy === "all" ? null : state.payload.strategies[state.strategy].analysis;
+  return state.payload.strategies.entry_point_2.analysis;
 }
 
 function fmtRatio(value, digits = 2) {
@@ -143,7 +145,7 @@ function capitalReturn(value) {
 function positionSummary() {
   const position = state.payload.metadata.position || {};
   const margin = position.margin_per_trade === null ? "固定手数" : `$${fmtNumber(position.margin_per_trade)} 每笔`;
-  return `${margin}，${fmtNumber(position.leverage, 0)}x 杠杆`;
+  return `${margin}，${fmtNumber(position.leverage, 0)}x 杠杆，同时 ${fmtNumber(position.max_positions, 0)} 个持仓`;
 }
 
 function pnlClass(value) {
@@ -166,13 +168,20 @@ function markers() {
     position: signal.side === "long" ? "belowBar" : "aboveBar",
     color: signal.side === "long" ? "#0f766e" : "#c2413b",
     shape: signal.side === "long" ? "arrowUp" : "arrowDown",
-    text: signal.strategy_id === "entry_point_2" ? "E2" : "E3",
+    text: "E2",
   }));
   chartTrades().forEach((trade) => {
     marks.push({ id: `trade-entry:${trade.id}`, time: trade.chart_entry_time, position: trade.side === "long" ? "belowBar" : "aboveBar", color: "#17222b", shape: "circle", text: "IN" });
     marks.push({ id: `trade-exit:${trade.id}`, time: trade.chart_exit_time, position: trade.side === "long" ? "aboveBar" : "belowBar", color: trade.net_pnl >= 0 ? "#0f766e" : "#c2413b", shape: "square", text: "OUT" });
   });
   return marks.sort((left, right) => left.time - right.time);
+}
+
+function disposeChart(chartKey, observerKey) {
+  state[observerKey]?.disconnect();
+  state[observerKey] = null;
+  state[chartKey]?.remove();
+  state[chartKey] = null;
 }
 
 function addSelectedPriceLines() {
@@ -195,6 +204,7 @@ function focusSelection() {
 
 function renderChart() {
   const root = byId("chart");
+  disposeChart("chart", "chartResizeObserver");
   root.replaceChildren();
   if (!window.LightweightCharts) throw new Error("Lightweight Charts \u52A0\u8F7D\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u540E\u5237\u65B0\u9875\u9762\u3002");
   const candles = state.payload.series[state.timeframe] || [];
@@ -236,7 +246,10 @@ function renderChart() {
     if (markerId.startsWith("signal:")) selectSignal(findSignal(markerId.slice(7)));
     if (markerId.startsWith("trade-entry:") || markerId.startsWith("trade-exit:")) selectTrade(findTrade(markerId.slice(markerId.indexOf(":", 6) + 1)));
   });
-  new ResizeObserver(([entry]) => state.chart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) })).observe(root);
+  state.chartResizeObserver = new ResizeObserver(([entry]) => {
+    if (state.chart) state.chart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) });
+  });
+  state.chartResizeObserver.observe(root);
 }
 
 function renderSummary() {
@@ -244,14 +257,6 @@ function renderSummary() {
   const total = metrics.win_count + metrics.loss_count;
   byId("strategy-title").textContent = strategyLabel(state.strategy);
   byId("metric-signals").textContent = metrics.signal_count;
-  if (state.strategy === "all") {
-    byId("metric-trades").textContent = "-";
-    byId("metric-pnl").textContent = "-";
-    byId("metric-pnl").className = "";
-    byId("metric-dd").textContent = "-";
-    byId("metric-win-rate").textContent = "-";
-    return;
-  }
   byId("metric-trades").textContent = metrics.trade_count;
   const pnl = byId("metric-pnl");
   pnl.textContent = `${metrics.net_pnl >= 0 ? "+" : ""}${fmtNumber(metrics.net_pnl)}`;
@@ -268,6 +273,7 @@ function setAnalysisValue(id, value, className = "") {
 
 function renderEquityChart(points) {
   const root = byId("equity-chart");
+  disposeChart("equityChart", "equityResizeObserver");
   root.replaceChildren();
   if (!points.length || !window.LightweightCharts) {
     root.textContent = "当前区间没有可绘制的已完成交易。";
@@ -284,7 +290,10 @@ function renderEquityChart(points) {
   const series = state.equityChart.addAreaSeries({ lineColor: "#0f766e", topColor: "rgba(15, 118, 110, 0.18)", bottomColor: "rgba(15, 118, 110, 0.02)", lineWidth: 2, priceLineVisible: false, crosshairMarkerVisible: false });
   series.setData(points);
   state.equityChart.timeScale().fitContent();
-  new ResizeObserver(([entry]) => state.equityChart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) })).observe(root);
+  state.equityResizeObserver = new ResizeObserver(([entry]) => {
+    if (state.equityChart) state.equityChart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) });
+  });
+  state.equityResizeObserver.observe(root);
 }
 
 function renderAttribution(id, rows, label, valueKey) {
@@ -303,42 +312,12 @@ function renderAttribution(id, rows, label, valueKey) {
   });
 }
 
-function renderComparison() {
-  const body = byId("comparison-body");
-  body.replaceChildren();
-  const second = state.payload.strategies.entry_point_2.analysis;
-  const third = state.payload.strategies.entry_point_3.analysis;
-  const rows = [
-    ["信号数", second.signal_count, third.signal_count, (value) => value],
-    ["完成交易", second.trade_count, third.trade_count, (value) => value],
-    ["成交率", second.fill_rate, third.fill_rate, fmtPercent],
-    ["净盈亏", second.net_pnl, third.net_pnl, fmtPnl],
-    ["账户收益率", capitalReturn(second.net_pnl), capitalReturn(third.net_pnl), fmtPercent],
-    ["胜率", second.win_rate, third.win_rate, fmtPercent],
-    ["利润因子", second.profit_factor, third.profit_factor, fmtRatio],
-    ["最大回撤", state.payload.strategies.entry_point_2.metrics.max_drawdown, state.payload.strategies.entry_point_3.metrics.max_drawdown, (value) => fmtNumber(value)],
-    ["平均单笔", second.average_pnl, third.average_pnl, fmtPnl],
-    ["连续亏损", second.max_consecutive_losses, third.max_consecutive_losses, (value) => value],
-  ];
-  rows.forEach(([label, secondValue, thirdValue, format]) => {
-    const row = document.createElement("tr");
-    row.innerHTML = `<th>${label}</th><td class="${typeof secondValue === "number" ? pnlClass(label.includes("盈亏") || label.includes("单笔") ? secondValue : 0) : ""}">${format(secondValue)}</td><td class="${typeof thirdValue === "number" ? pnlClass(label.includes("盈亏") || label.includes("单笔") ? thirdValue : 0) : ""}">${format(thirdValue)}</td>`;
-    body.append(row);
-  });
-}
-
 function renderAnalysis() {
-  const isComparison = state.strategy === "all";
-  byId("comparison-view").hidden = !isComparison;
-  byId("single-analysis-view").hidden = isComparison;
-  byId("analysis-title").textContent = isComparison ? "策略对比" : `${strategyLabel(state.strategy)} 回测分析`;
-  byId("analysis-subtitle").textContent = isComparison ? "两套策略独立回测，未合并为组合权益曲线。" : positionSummary();
-  if (isComparison) {
-    renderComparison();
-    return;
-  }
+  byId("single-analysis-view").hidden = false;
+  byId("analysis-title").textContent = `${strategyLabel(state.strategy)} 回测分析`;
+  byId("analysis-subtitle").textContent = positionSummary();
   const analysis = selectedAnalysis();
-  const maxDrawdown = state.payload.strategies[state.strategy].metrics.max_drawdown;
+  const maxDrawdown = state.payload.strategies.entry_point_2.metrics.max_drawdown;
   const capital = initialCapital();
   setAnalysisValue("analysis-final-equity", fmtPnl(analysis.net_pnl), pnlClass(analysis.net_pnl));
   setAnalysisValue("analysis-initial-capital", capital === null ? "请填写有效资金" : `$${fmtNumber(capital)}`);
@@ -469,6 +448,7 @@ function renderPositionInputs() {
   const position = state.payload.metadata.position || {};
   byId("margin-per-trade").value = position.margin_per_trade ?? 1000;
   byId("position-leverage").value = position.leverage ?? 20;
+  byId("max-positions").value = position.max_positions ?? 1;
 }
 
 function setRangeMessage(message = "") {
@@ -481,6 +461,7 @@ function activePositionParams() {
   return {
     margin_per_trade: byId("margin-per-trade")?.value,
     leverage: byId("position-leverage")?.value,
+    max_positions: byId("max-positions")?.value,
   };
 }
 
@@ -492,6 +473,7 @@ async function loadPayload(start, end, position = activePositionParams()) {
   }
   if (position.margin_per_trade) search.set("margin_per_trade", position.margin_per_trade);
   if (position.leverage) search.set("leverage", position.leverage);
+  if (position.max_positions) search.set("max_positions", position.max_positions);
   const params = search.size ? `?${search}` : "";
   const response = await fetch(`/api/dashboard${params}`, { cache: "no-store" });
   const body = await response.json();
@@ -526,15 +508,19 @@ async function applyPosition(event) {
   event.preventDefault();
   const margin = Number(byId("margin-per-trade").value);
   const leverage = Number(byId("position-leverage").value);
-  if (!Number.isFinite(margin) || margin <= 0 || !Number.isFinite(leverage) || leverage <= 0) {
-    setRangeMessage("每次交易金额和杠杆必须为正数。");
+  const maxPositions = Number(byId("max-positions").value);
+  if (!Number.isFinite(margin) || margin <= 0 || !Number.isFinite(leverage) || leverage <= 0 || !Number.isInteger(maxPositions) || maxPositions <= 0) {
+    setRangeMessage("每次交易金额、杠杆和同时持仓数必须有效。");
     return;
   }
+  const start = byId("range-start").value;
+  const end = byId("range-end").value;
+  if (!start || !end) return;
   const button = byId("apply-position");
   button.disabled = true;
   setRangeMessage("");
   try {
-    state.payload = await loadPayload();
+    state.payload = await loadPayload(start, end, activePositionParams());
     clearSelection();
     renderMetadata();
     renderPositionInputs();

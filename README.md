@@ -8,7 +8,7 @@
 - 唯一标的：`XAU_USD` 黄金现货/CFD；
 - 基础周期为 1 分钟，并从同一份数据生成 5 分钟和 30 分钟周期；
 - 入场点 2：三周期同向趋势下的新突破；
-- 入场点 3：初始突破、ATR 回调和二次突破状态机；
+- 入场点 3：初始突破、ATR 回调和二次突破状态机（当前暂不参与回测）；
 - 下一根基础 K 线开盘成交的确定性回测，含止损、止盈、点差、滑点和手续费；
 - 输出可复现的 manifest、信号、信号质量窗口、交易记录、指标和 Markdown 报告。
 
@@ -37,8 +37,9 @@ python -m gold_research.cli validate-config --config configs/xauusd_baseline.tom
 
 ```text
 python -m gold_research.cli run --config configs/xauusd_baseline.toml --start 2026-01-01T00:00:00Z --end 2026-08-01T00:00:00Z --strategy entry_point_2
-python -m gold_research.cli run --config configs/xauusd_baseline.toml --start 2026-01-01T00:00:00Z --end 2026-08-01T00:00:00Z --strategy entry_point_3
 ```
+
+当前暂时只回测入场点2，入场点3已屏蔽，后续恢复时再重新开放。
 
 OANDA 请求只会调用 `/v3/instruments/XAU_USD/candles`。请求会按最多 5,000 根 K 线分页；完整响应缓存到 `data/cache/oanda/`，缓存内容、输出 manifest 和日志都不包含 token。未完成的当前 K 线会被丢弃。
 
@@ -47,10 +48,10 @@ OANDA 请求只会调用 `/v3/instruments/XAU_USD/candles`。请求会按最多 
 使用 Lightweight Charts 在本地查看 K 线、入场信号和回测成交。`--warmup-start` 只用于计算指标预热，页面只展示 `--start` 到 `--end` 的数据：
 
 ```text
-python -m gold_research.cli dashboard --config configs/xauusd_baseline.toml --warmup-start 2026-08-09T22:00:00Z --start 2026-08-11T00:00:00Z --end 2026-08-11T21:00:00Z
+python -m gold_research.cli dashboard --config configs/xauusd_baseline.toml --warmup-start 2026-08-09T22:00:00Z --start 2026-08-11T00:00:00Z
 ```
 
-然后在浏览器打开 `http://127.0.0.1:8000`。页面支持切换 1 分钟、5 分钟、30 分钟 K 线、两个入场策略和 UTC 回测日期范围。日期范围可在运行中随时修改：看板会按需从 OANDA 下载尚未缓存的区间，并自动额外加载 7 天历史数据用于 EMA、趋势和信号预热；已加载区间会保留在当前服务进程的内存缓存中。`--warmup-start` 仅决定首次打开页面时的初始数据窗口。
+然后在浏览器打开 `http://127.0.0.1:8000`。省略 `--end` 时，结束时间默认取当前 UTC 时间；显式传入 `--end` 可以覆盖它。页面支持切换 1 分钟、5 分钟、30 分钟 K 线、入场点2策略和 UTC 回测日期范围。日期范围可在运行中随时修改：看板会按需从 OANDA 下载尚未缓存的区间，并自动额外加载 7 天历史数据用于 EMA、趋势和信号预热；已加载区间会保留在当前服务进程的内存缓存中。`--warmup-start` 仅决定首次打开页面时的初始数据窗口。
 
 系统固定使用 OANDA `XAU_USD` 的 `mid`、`bid` 或 `ask` 价序列；合约元数据固定为 OANDA spot/CFD、1 金衡盎司、USD、最小报价单位 `0.01`、每点价值 `1.0`。历史回测以 OANDA 返回的完整 K 线为唯一时间序列事实来源；系统不根据本地日历或相邻 K 线间隔推断某一分钟应当存在。
 
@@ -65,6 +66,7 @@ python -m gold_research.cli dashboard --config configs/xauusd_baseline.toml --wa
 margin_per_trade = 1000.0
 units_per_lot = 100.0
 leverage = 20.0
+max_positions = 1
 ```
 
 每次交易金额是每笔使用的保证金。例如 `$1,000` 和 `20x` 杠杆代表约 `$20,000` 的名义仓位；系统按实际进场价换算黄金数量和手数。净盈亏、点差、滑点和手续费按换算后的数量计算。

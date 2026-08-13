@@ -118,12 +118,13 @@ class CostConfig:
 
 @dataclass(frozen=True)
 class PositionConfig:
-    """Position sizing and margin assumptions for each trade."""
+    """Position sizing, margin, and concurrency assumptions for each trade."""
 
     lots: float | None
     margin_per_trade: float | None
     units_per_lot: float
     leverage: float
+    max_positions: int
 
     def quantity_for_entry(self, entry_price: float, point_value: float) -> float:
         """Return units sized from fixed margin, or legacy fixed lots when set."""
@@ -146,7 +147,13 @@ def _position_config(position: dict[str, Any]) -> PositionConfig:
     """
 
     if not position:
-        return PositionConfig(lots=1.0, margin_per_trade=None, units_per_lot=1.0, leverage=1.0)
+        return PositionConfig(
+            lots=1.0,
+            margin_per_trade=None,
+            units_per_lot=1.0,
+            leverage=1.0,
+            max_positions=1,
+        )
     margin_per_trade = _optional_positive_float(
         position.get("margin_per_trade"),
         "position.margin_per_trade",
@@ -161,6 +168,7 @@ def _position_config(position: dict[str, Any]) -> PositionConfig:
         margin_per_trade=margin_per_trade,
         units_per_lot=_positive_float(position.get("units_per_lot", 100.0), "position.units_per_lot"),
         leverage=_positive_float(position.get("leverage", 20.0), "position.leverage"),
+        max_positions=_positive_int(position.get("max_positions", 1), "position.max_positions"),
     )
 
 

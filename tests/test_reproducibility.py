@@ -112,6 +112,10 @@ class ReproducibilityTests(unittest.TestCase):
         self.assertTrue(run.manifest.research_usable)
         self.assertFalse(any(issue.code == "UNVERIFIED_SOURCE_METADATA" for issue in run.warnings))
 
+    def test_entry_point_3_research_is_temporarily_disabled(self) -> None:
+        with self.assertRaisesRegex(ValueError, "entry_point_3.*disabled"):
+            run_research(_bars(), _config(), "entry_point_3", data_fingerprint="fixture-hash", code_root="src/gold_research")
+
     def test_signal_quality_mfe_and_mae_use_non_negative_directional_basis(self) -> None:
         values = [100.0] * 20
         values[11:16] = [99.0, 98.0, 99.0, 97.0, 98.0]

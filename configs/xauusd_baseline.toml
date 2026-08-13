@@ -29,7 +29,7 @@ enabled = true
 breakout_lookback = 20
 
 [entry_point_3]
-enabled = true
+enabled = false
 pullback_min_atr = 0.5
 pullback_min_bars = 2
 max_setup_bars = 30
@@ -52,3 +52,4 @@ require_explicit_costs = true
 margin_per_trade = 1000.0
 units_per_lot = 100.0
 leverage = 20.0
+max_positions = 1

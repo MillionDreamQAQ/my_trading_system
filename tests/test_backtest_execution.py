@@ -18,6 +18,7 @@ def _config(
     lots: float = 1.0,
     units_per_lot: float = 1.0,
     leverage: float = 1.0,
+    max_positions: int = 1,
 ) -> ResearchConfig:
     return ResearchConfig.from_mapping(
         {
@@ -33,7 +34,7 @@ def _config(
                 "slippage_model": "fixed", "slippage_value": slippage,
                 "commission_per_unit": 0.0, "require_explicit_costs": True,
             },
-            "position": {"lots": lots, "units_per_lot": units_per_lot, "leverage": leverage},
+            "position": {"lots": lots, "units_per_lot": units_per_lot, "leverage": leverage, "max_positions": max_positions},
         }
     )
 
@@ -215,6 +216,20 @@ class BacktestExecutionTests(unittest.TestCase):
         self.assertEqual(len(result.trades), 1)
         self.assertEqual(result.trades[0].entry_price, 102.0)
         self.assertEqual(result.unfilled_signals[0]["reason"], "invalid_atr")
+
+    def test_max_positions_allows_parallel_trades_and_records_overflow(self) -> None:
+        bars = _bars(
+            [
+                (100, 100.5, 99.5, 100),
+                (100, 101, 99, 100),
+                (100, 101, 99, 100),
+                (100, 101, 99, 100),
+            ]
+        )
+        result = run_backtest(bars, [_signal(0), _signal(0), _signal(0)], _config(max_positions=2))
+
+        self.assertEqual(len(result.trades), 2)
+        self.assertEqual(len([item for item in result.unfilled_signals if item["reason"] == "position_conflict"]), 1)
 
 
 class CostModelTests(unittest.TestCase):

@@ -1,4 +1,4 @@
-"""Deterministic one-position-at-a-time OHLC bar-event simulator."""
+"""Deterministic OHLC bar-event simulator with a configurable position limit."""
 
 from __future__ import annotations
 
@@ -140,8 +140,8 @@ def run_backtest(
     """Run signals over bars in chronological order.
 
     Orders are submitted after the signal close and filled at the next bar's
-    open. Existing positions retain candidate signals as unfilled-by-position
-    records rather than silently deleting them.
+    open. Candidate signals beyond the configured concurrent-position limit
+    are retained as unfilled-by-position records rather than silently deleted.
     """
 
     bars = series.bars.reset_index(drop=True)
@@ -155,17 +155,21 @@ def run_backtest(
     for signal in signals:
         if signal.entry_time is not None:
             by_entry.setdefault(pd.Timestamp(signal.entry_time), []).append(signal)
-    position: _Position | None = None
+    positions: list[_Position] = []
     trades: list[Trade] = []
     unfilled: list[dict[str, object]] = []
 
     for index, row in enumerate(bars.itertuples(index=False)):
         open_time = pd.Timestamp(row.open_time)
         candidates = by_entry.get(open_time, [])
-        if candidates and position is None:
-            for candidate_index, signal in enumerate(candidates):
+        if candidates:
+            available_slots = max(config.position.max_positions - len(positions), 0)
+            for signal in candidates:
                 if pd.isna(signal.atr) or signal.atr is None or signal.atr <= 0:
                     unfilled.append({"signal_time": signal.signal_time.isoformat(), "reason": "invalid_atr"})
+                    continue
+                if available_slots <= 0:
+                    unfilled.append({"signal_time": signal.signal_time.isoformat(), "reason": "position_conflict"})
                     continue
                 mid_open = float(row.open)
                 entry_price = costs.execution_price(mid_open, signal.side, "entry")
@@ -176,7 +180,7 @@ def run_backtest(
                     stop = entry_price + config.risk.stop_atr * signal.atr
                     target = entry_price - config.risk.target_atr * signal.atr
                 quantity = config.position.quantity_for_entry(entry_price, config.instrument.point_value)
-                position = _Position(
+                positions.append(_Position(
                     signal,
                     index,
                     open_time,
@@ -188,85 +192,80 @@ def run_backtest(
                     config.position.leverage,
                     stop,
                     target,
-                )
-                for ignored in candidates[candidate_index + 1 :]:
-                    unfilled.append({"signal_time": ignored.signal_time.isoformat(), "reason": "position_conflict"})
-                break
-        elif candidates:
-            for ignored in candidates:
-                unfilled.append({"signal_time": ignored.signal_time.isoformat(), "reason": "position_conflict"})
+                ))
+                available_slots -= 1
 
-        if position is None:
+        if not positions:
             continue
         high = float(row.high)
         low = float(row.low)
-        side = position.signal.side
-        open_quote = costs.quote_price(float(row.open), side, "exit")
-        high_quote = costs.quote_price(high, side, "exit")
-        low_quote = costs.quote_price(low, side, "exit")
-        if side is Direction.LONG:
-            position.mfe = max(position.mfe, high_quote - position.entry_price)
-            position.mae = max(position.mae, position.entry_price - low_quote)
-            if low_quote <= position.stop_price:
-                trigger_quote = _trigger_quote(open_quote, position.stop_price, side, "stop")
+        remaining: list[_Position] = []
+        for position in positions:
+            side = position.signal.side
+            open_quote = costs.quote_price(float(row.open), side, "exit")
+            high_quote = costs.quote_price(high, side, "exit")
+            low_quote = costs.quote_price(low, side, "exit")
+            exit_reason: str | None = None
+            trigger_quote: float | None = None
+            if side is Direction.LONG:
+                position.mfe = max(position.mfe, high_quote - position.entry_price)
+                position.mae = max(position.mae, position.entry_price - low_quote)
+                if low_quote <= position.stop_price:
+                    exit_reason = "stop"
+                    trigger_quote = _trigger_quote(open_quote, position.stop_price, side, exit_reason)
+                elif high_quote >= position.target_price:
+                    exit_reason = "target"
+                    trigger_quote = _trigger_quote(open_quote, position.target_price, side, exit_reason)
+            else:
+                position.mfe = max(position.mfe, position.entry_price - low_quote)
+                position.mae = max(position.mae, high_quote - position.entry_price)
+                if high_quote >= position.stop_price:
+                    exit_reason = "stop"
+                    trigger_quote = _trigger_quote(open_quote, position.stop_price, side, exit_reason)
+                elif low_quote <= position.target_price:
+                    exit_reason = "target"
+                    trigger_quote = _trigger_quote(open_quote, position.target_price, side, exit_reason)
+
+            if exit_reason is not None and trigger_quote is not None:
                 exit_reference = costs.reference_price(trigger_quote, side, "exit")
                 exit_price = costs.execution_price(exit_reference, side, "exit")
-                trades.append(_trade_from_position(position, bars, index, exit_price, exit_reference, "stop", costs))
-                position = None
-            elif high_quote >= position.target_price:
-                trigger_quote = _trigger_quote(open_quote, position.target_price, side, "target")
-                exit_reference = costs.reference_price(trigger_quote, side, "exit")
-                exit_price = costs.execution_price(exit_reference, side, "exit")
-                trades.append(_trade_from_position(position, bars, index, exit_price, exit_reference, "target", costs))
-                position = None
-        else:
-            position.mfe = max(position.mfe, position.entry_price - low_quote)
-            position.mae = max(position.mae, high_quote - position.entry_price)
-            if high_quote >= position.stop_price:
-                trigger_quote = _trigger_quote(open_quote, position.stop_price, side, "stop")
-                exit_reference = costs.reference_price(trigger_quote, side, "exit")
-                exit_price = costs.execution_price(exit_reference, side, "exit")
-                trades.append(_trade_from_position(position, bars, index, exit_price, exit_reference, "stop", costs))
-                position = None
-            elif low_quote <= position.target_price:
-                trigger_quote = _trigger_quote(open_quote, position.target_price, side, "target")
-                exit_reference = costs.reference_price(trigger_quote, side, "exit")
-                exit_price = costs.execution_price(exit_reference, side, "exit")
-                trades.append(_trade_from_position(position, bars, index, exit_price, exit_reference, "target", costs))
-                position = None
-        if position is not None and index - position.entry_index >= config.risk.max_hold_bars:
-            exit_price = costs.execution_price(float(row.close), side, "exit")
+                trades.append(_trade_from_position(position, bars, index, exit_price, exit_reference, exit_reason, costs))
+                continue
+            if index - position.entry_index >= config.risk.max_hold_bars:
+                exit_price = costs.execution_price(float(row.close), side, "exit")
+                trades.append(
+                    _trade_from_position(
+                        position,
+                        bars,
+                        index,
+                        exit_price,
+                        float(row.close),
+                        "timeout",
+                        costs,
+                        exit_at_close=True,
+                    )
+                )
+                continue
+            remaining.append(position)
+        positions = remaining
+
+    if positions and not bars.empty:
+        final_index = len(bars) - 1
+        final_row = bars.iloc[final_index]
+        for position in positions:
+            exit_price = costs.execution_price(float(final_row["close"]), position.signal.side, "exit")
             trades.append(
                 _trade_from_position(
                     position,
                     bars,
-                    index,
+                    final_index,
                     exit_price,
-                    float(row.close),
-                    "timeout",
+                    float(final_row["close"]),
+                    "data_end",
                     costs,
                     exit_at_close=True,
                 )
             )
-            position = None
-
-    if position is not None and not bars.empty:
-        final_index = len(bars) - 1
-        final_row = bars.iloc[final_index]
-        exit_price = costs.execution_price(float(final_row["close"]), position.signal.side, "exit")
-        trades.append(
-            _trade_from_position(
-                position,
-                bars,
-                final_index,
-                exit_price,
-                float(final_row["close"]),
-                "data_end",
-                costs,
-                exit_at_close=True,
-            )
-        )
-        position = None
     known_open_times = set(bars["open_time"])
     for signal in signals:
         if signal.entry_time is None:

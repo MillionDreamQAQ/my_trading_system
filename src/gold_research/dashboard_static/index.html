@@ -58,9 +58,7 @@
             </fieldset>
             <fieldset class="segmented strategy-switch">
               <legend class="sr-only">&#x4FE1;&#x53F7;&#x7B56;&#x7565;</legend>
-              <label><input type="radio" name="strategy" value="all"><span>&#x5168;&#x90E8;</span></label>
               <label><input type="radio" name="strategy" value="entry_point_2" checked><span>&#x5165;&#x573A;&#x70B9;2</span></label>
-              <label><input type="radio" name="strategy" value="entry_point_3"><span>&#x5165;&#x573A;&#x70B9;3</span></label>
             </fieldset>
           </div>
           <p id="range-message" class="range-message" aria-live="polite" hidden></p>
@@ -139,7 +137,7 @@
       <section class="summary-band" aria-label="&#x7B56;&#x7565;&#x6C47;&#x603B;">
         <div class="section-title">
           <p class="eyebrow">&#x5F53;&#x524D;&#x7B56;&#x7565;</p>
-          <h2 id="strategy-title">&#x5168;&#x90E8;&#x4FE1;&#x53F7;</h2>
+          <h2 id="strategy-title">&#x5165;&#x573A;&#x70B9;2</h2>
         </div>
         <dl class="metrics">
           <div><dt>&#x4FE1;&#x53F7;&#x6570;</dt><dd id="metric-signals">-</dd></div>
@@ -166,6 +164,10 @@
                 <span>&#x6760;&#x6746;&#xFF08;x&#xFF09;</span>
                 <input id="position-leverage" type="number" min="1" step="1" inputmode="decimal" value="20" required>
               </label>
+              <label class="capital-control">
+                <span>&#x540C;&#x65F6;&#x5141;&#x8BB8;&#x6301;&#x4ED3;&#x6570;</span>
+                <input id="max-positions" type="number" min="1" step="1" inputmode="numeric" value="1" required>
+              </label>
               <button id="apply-position" type="submit">&#x5E94;&#x7528;</button>
             </form>
             <label class="capital-control">
@@ -174,15 +176,6 @@
             </label>
             <p id="analysis-subtitle" class="section-note"></p>
           </div>
-        </div>
-
-        <div id="comparison-view" class="comparison-grid" hidden>
-          <article class="analysis-table-wrap">
-            <table class="analysis-table">
-              <thead><tr><th>&#x6307;&#x6807;</th><th>&#x5165;&#x573A;&#x70B92</th><th>&#x5165;&#x573A;&#x70B93</th></tr></thead>
-              <tbody id="comparison-body"></tbody>
-            </table>
-          </article>
         </div>
 
         <div id="single-analysis-view">

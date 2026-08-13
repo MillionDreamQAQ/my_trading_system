@@ -5,6 +5,7 @@ import os
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -44,6 +45,25 @@ def _oanda_series():
 
 
 class CliSourceTests(unittest.TestCase):
+    def test_dashboard_end_defaults_to_current_utc_time(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "dashboard",
+                "--config",
+                "configs/xauusd_baseline.toml",
+                "--start",
+                "2026-01-01T00:00:00Z",
+            ]
+        )
+
+        end = datetime.fromisoformat(args.end.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+
+        self.assertEqual(end.tzinfo, timezone.utc)
+        self.assertEqual(end.date(), now.date())
+        self.assertLessEqual(end, now)
+        self.assertGreater(end, now - timedelta(minutes=2))
+
     def test_oanda_run_passes_environment_token_and_xauusd_metadata(self) -> None:
         series = _oanda_series()
         captured = {}
@@ -172,6 +192,22 @@ class CliSourceTests(unittest.TestCase):
                             "entry_point_2",
                         ]
                     )
+
+    def test_entry_point_3_strategy_is_not_available(self) -> None:
+        with self.assertRaises(SystemExit):
+            build_parser().parse_args(
+                [
+                    "run",
+                    "--config",
+                    "configs/xauusd_baseline.toml",
+                    "--start",
+                    "2026-01-01T00:00:00Z",
+                    "--end",
+                    "2026-01-02T00:00:00Z",
+                    "--strategy",
+                    "entry_point_3",
+                ]
+            )
 
     def test_validate_config_rejects_non_oanda_contract(self) -> None:
         config = load_config("configs/xauusd_baseline.toml")

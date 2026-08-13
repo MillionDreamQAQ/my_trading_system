@@ -26,6 +26,7 @@ class ConfigContractTests(unittest.TestCase):
         self.assertEqual(config.position.margin_per_trade, 1000.0)
         self.assertEqual(config.position.units_per_lot, 100.0)
         self.assertEqual(config.position.leverage, 20.0)
+        self.assertEqual(config.position.max_positions, 1)
         self.assertTrue(config.costs.require_explicit_costs)
         self.assertEqual(len(config.fingerprint()), 64)
 
@@ -66,6 +67,16 @@ class ConfigContractTests(unittest.TestCase):
                 raw[section][field] = invalid
 
                 with self.assertRaisesRegex(ConfigError, field):
+                    load_config_from_mapping(raw)
+
+    def test_max_positions_must_be_a_positive_integer(self) -> None:
+        for invalid in (0, -1, 1.5, True):
+            with self.subTest(invalid=invalid):
+                with Path("configs/xauusd_baseline.toml").open("rb") as handle:
+                    raw = tomllib.load(handle)
+                raw["position"]["max_positions"] = invalid
+
+                with self.assertRaisesRegex(ConfigError, "max_positions"):
                     load_config_from_mapping(raw)
 
     def test_boolean_fields_require_real_booleans(self) -> None:
