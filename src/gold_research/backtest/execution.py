@@ -159,15 +159,15 @@ def run_backtest(
     trades: list[Trade] = []
     unfilled: list[dict[str, object]] = []
 
-    for index, row in bars.iterrows():
-        open_time = pd.Timestamp(row["open_time"])
+    for index, row in enumerate(bars.itertuples(index=False)):
+        open_time = pd.Timestamp(row.open_time)
         candidates = by_entry.get(open_time, [])
         if candidates and position is None:
             for candidate_index, signal in enumerate(candidates):
                 if pd.isna(signal.atr) or signal.atr is None or signal.atr <= 0:
                     unfilled.append({"signal_time": signal.signal_time.isoformat(), "reason": "invalid_atr"})
                     continue
-                mid_open = float(row["open"])
+                mid_open = float(row.open)
                 entry_price = costs.execution_price(mid_open, signal.side, "entry")
                 if signal.side is Direction.LONG:
                     stop = entry_price - config.risk.stop_atr * signal.atr
@@ -198,10 +198,10 @@ def run_backtest(
 
         if position is None:
             continue
-        high = float(row["high"])
-        low = float(row["low"])
+        high = float(row.high)
+        low = float(row.low)
         side = position.signal.side
-        open_quote = costs.quote_price(float(row["open"]), side, "exit")
+        open_quote = costs.quote_price(float(row.open), side, "exit")
         high_quote = costs.quote_price(high, side, "exit")
         low_quote = costs.quote_price(low, side, "exit")
         if side is Direction.LONG:
@@ -235,14 +235,14 @@ def run_backtest(
                 trades.append(_trade_from_position(position, bars, index, exit_price, exit_reference, "target", costs))
                 position = None
         if position is not None and index - position.entry_index >= config.risk.max_hold_bars:
-            exit_price = costs.execution_price(float(row["close"]), side, "exit")
+            exit_price = costs.execution_price(float(row.close), side, "exit")
             trades.append(
                 _trade_from_position(
                     position,
                     bars,
                     index,
                     exit_price,
-                    float(row["close"]),
+                    float(row.close),
                     "timeout",
                     costs,
                     exit_at_close=True,
