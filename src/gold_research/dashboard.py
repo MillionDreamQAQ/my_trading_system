@@ -21,7 +21,7 @@ from .config import ResearchConfig
 from .data.loader import DataSourceError
 from .data.resample import resample_bars
 from .data.validate import DataValidationError, validate_bar_series
-from .domain import BarSeries, Signal
+from .domain import BarSeries, Direction, Signal
 from .strategy.entry_point_2 import detect_entry_point_2
 from .strategy.indicators import add_indicators, trend_state
 from .strategy.timeframe_context import build_timeframe_context
@@ -181,11 +181,19 @@ def _dashboard_config_for_position(
     margin_per_trade: str | None,
     leverage: str | None,
     max_positions: str | None = None,
+    direction: str | None = None,
 ) -> ResearchConfig:
     """Apply optional dashboard-only sizing values without changing the TOML."""
 
-    if margin_per_trade is None and leverage is None and max_positions is None:
+    if margin_per_trade is None and leverage is None and max_positions is None and direction is None:
         return config
+
+    try:
+        active_direction = config.direction if direction is None else Direction(direction.lower())
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("direction must be long, short, or both") from exc
+    if margin_per_trade is None and leverage is None and max_positions is None:
+        return replace(config, direction=active_direction)
 
     def positive_number(value: str | None, fallback: float | None, name: str) -> float:
         candidate = fallback if value is None else float(value)
@@ -203,6 +211,7 @@ def _dashboard_config_for_position(
         raise ValueError("max_positions must be a positive integer")
     return replace(
         config,
+        direction=active_direction,
         position=replace(
             config.position,
             lots=None,
@@ -490,6 +499,7 @@ def build_dashboard_payload(
             "price_basis": base.metadata.price_basis.value,
             "display_start": start.isoformat(),
             "display_end": end.isoformat(),
+            "direction": config.direction.value,
             "available_start": base.start.isoformat(),
             "available_end": base.end.isoformat(),
             "warmup_start": base.start.isoformat() if base.start is not None else None,
@@ -539,13 +549,22 @@ class _DashboardHandler(SimpleHTTPRequestHandler):
         margin_per_trade = query.get("margin_per_trade", [None])[0]
         leverage = query.get("leverage", [None])[0]
         max_positions = query.get("max_positions", [None])[0]
+        direction = query.get("direction", [None])[0]
         active_config = _dashboard_config_for_position(
             self.server.config,
             margin_per_trade,
             leverage,
             max_positions,
+            direction,
         )
-        if start is None and end is None and margin_per_trade is None and leverage is None and max_positions is None:
+        if (
+            start is None
+            and end is None
+            and margin_per_trade is None
+            and leverage is None
+            and max_positions is None
+            and direction is None
+        ):
             return self.server.payload
         if start is None:
             start = self.server.default_display_start.isoformat()

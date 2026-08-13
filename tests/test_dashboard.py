@@ -15,7 +15,7 @@ from gold_research.dashboard import (
     dashboard_error_message,
 )
 from gold_research.data.normalize import normalize_ohlc_frame
-from gold_research.domain import InstrumentMetadata, PriceBasis
+from gold_research.domain import Direction, InstrumentMetadata, PriceBasis
 
 
 def _config() -> ResearchConfig:
@@ -74,6 +74,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(payload["metadata"]["available_start"], "2026-01-01T00:00:00+00:00")
         self.assertEqual(payload["metadata"]["available_end"], "2026-01-01T03:01:00+00:00")
         self.assertEqual(payload["metadata"]["display_start"], "2026-01-01T02:00:00+00:00")
+        self.assertEqual(payload["metadata"]["direction"], "both")
         self.assertEqual(payload["metadata"]["trend"]["ema_slow"], 3)
         self.assertIn("ema_fast", payload["series"]["1min"][0])
         self.assertIn("trend", payload["series"]["30min"][0])
@@ -174,6 +175,19 @@ class DashboardTests(unittest.TestCase):
     def test_dashboard_rejects_non_integer_max_positions(self) -> None:
         with self.assertRaisesRegex(ValueError, "max_positions"):
             _dashboard_config_for_position(_config(), "1000", "20", "1.5")
+
+    def test_dashboard_direction_override_changes_only_direction(self) -> None:
+        config = _config()
+
+        updated = _dashboard_config_for_position(config, None, None, None, "short")
+
+        self.assertEqual(updated.direction, Direction.SHORT)
+        self.assertEqual(updated.position, config.position)
+        self.assertEqual(config.direction, Direction.BOTH)
+
+    def test_dashboard_rejects_invalid_direction(self) -> None:
+        with self.assertRaisesRegex(ValueError, "direction"):
+            _dashboard_config_for_position(_config(), None, None, None, "sideways")
 
     def test_backtest_analysis_reports_equity_and_trade_attribution(self) -> None:
         trades = [

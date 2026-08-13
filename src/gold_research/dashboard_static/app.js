@@ -4,6 +4,7 @@ const state = {
   payload: null,
   timeframe: "1min",
   strategy: "entry_point_2",
+  direction: "both",
   chart: null,
   chartResizeObserver: null,
   candleSeries: null,
@@ -451,6 +452,12 @@ function renderPositionInputs() {
   byId("max-positions").value = position.max_positions ?? 1;
 }
 
+function renderDirectionInput() {
+  state.direction = state.payload.metadata.direction || "both";
+  const input = document.querySelector(`input[name=direction][value="${state.direction}"]`);
+  if (input) input.checked = true;
+}
+
 function setRangeMessage(message = "") {
   const element = byId("range-message");
   element.hidden = !message;
@@ -465,7 +472,11 @@ function activePositionParams() {
   };
 }
 
-async function loadPayload(start, end, position = activePositionParams()) {
+function activeDirection() {
+  return document.querySelector("input[name=direction]:checked")?.value || state.direction || "both";
+}
+
+async function loadPayload(start, end, position = activePositionParams(), direction = activeDirection()) {
   const search = new URLSearchParams();
   if (start && end) {
     search.set("start", `${start}:00Z`);
@@ -474,6 +485,7 @@ async function loadPayload(start, end, position = activePositionParams()) {
   if (position.margin_per_trade) search.set("margin_per_trade", position.margin_per_trade);
   if (position.leverage) search.set("leverage", position.leverage);
   if (position.max_positions) search.set("max_positions", position.max_positions);
+  if (direction) search.set("direction", direction);
   const params = search.size ? `?${search}` : "";
   const response = await fetch(`/api/dashboard${params}`, { cache: "no-store" });
   const body = await response.json();
@@ -495,6 +507,7 @@ async function applyRange(event) {
     renderMetadata();
     renderRangeInputs();
     renderPositionInputs();
+    renderDirectionInput();
     selectFirstInspectable();
     renderAll();
   } catch (error) {
@@ -524,6 +537,7 @@ async function applyPosition(event) {
     clearSelection();
     renderMetadata();
     renderPositionInputs();
+    renderDirectionInput();
     selectFirstInspectable();
     renderAll();
   } catch (error) {
@@ -534,19 +548,48 @@ async function applyPosition(event) {
 }
 
 async function start() {
-  state.payload = await loadPayload(null, null, {});
+  state.payload = await loadPayload(null, null, {}, null);
   renderMetadata();
   renderRangeInputs();
   renderPositionInputs();
+  renderDirectionInput();
   selectFirstInspectable();
   byId("date-range-form").addEventListener("submit", applyRange);
   byId("position-form").addEventListener("submit", applyPosition);
   byId("initial-capital").addEventListener("input", () => renderAnalysis());
   document.querySelectorAll("input[name=timeframe]").forEach((input) => input.addEventListener("change", () => { state.timeframe = input.value; renderAll(); }));
   document.querySelectorAll("input[name=strategy]").forEach((input) => input.addEventListener("change", () => { state.strategy = input.value; selectFirstInspectable(); renderAll(); }));
+  document.querySelectorAll("input[name=direction]").forEach((input) => input.addEventListener("change", applyDirection));
   byId("previous-trade").addEventListener("click", () => moveTrade(-1));
   byId("next-trade").addEventListener("click", () => moveTrade(1));
   renderAll();
+}
+
+async function applyDirection() {
+  const direction = activeDirection();
+  const start = byId("range-start").value;
+  const end = byId("range-end").value;
+  if (!start || !end) return;
+  const previousDirection = state.direction;
+  const controls = document.querySelectorAll("input[name=direction]");
+  controls.forEach((input) => { input.disabled = true; });
+  setRangeMessage("");
+  try {
+    state.payload = await loadPayload(start, end, activePositionParams(), direction);
+    clearSelection();
+    renderMetadata();
+    renderRangeInputs();
+    renderPositionInputs();
+    renderDirectionInput();
+    selectFirstInspectable();
+    renderAll();
+  } catch (error) {
+    state.direction = previousDirection;
+    renderDirectionInput();
+    setRangeMessage(error.message);
+  } finally {
+    controls.forEach((input) => { input.disabled = false; });
+  }
 }
 
 start().catch((error) => {
