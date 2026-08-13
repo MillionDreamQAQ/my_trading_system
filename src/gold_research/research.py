@@ -8,7 +8,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
+from pandas.api.types import is_numeric_dtype
 
 from .backtest.execution import BacktestResult, run_backtest
 from .backtest.metrics import summarize_trades
@@ -122,25 +124,92 @@ def evaluate_signal_quality(
 
     bars = series.bars.reset_index(drop=True)
     close_to_index = {pd.Timestamp(value): index for index, value in enumerate(bars["close_time"])}
+    matched_signals = [
+        (signal, index)
+        for signal in signals
+        if (index := close_to_index.get(pd.Timestamp(signal.signal_time))) is not None
+    ]
+    if not matched_signals:
+        return ()
+
+    price_columns = ("high", "low", "close")
+    if not all(column in bars.columns and is_numeric_dtype(bars[column]) for column in price_columns):
+        records: list[dict[str, Any]] = []
+        for signal, index in matched_signals:
+            entry_close = float(bars.loc[index, "close"])
+            for window in windows:
+                end = index + window
+                if window <= 0 or end >= len(bars):
+                    continue
+                future = bars.iloc[index + 1 : end + 1]
+                if signal.side.value == "long":
+                    forward_return = float(bars.loc[end, "close"]) / entry_close - 1.0
+                    mfe = max(0.0, float(future["high"].max()) / entry_close - 1.0)
+                    mae = max(0.0, 1.0 - float(future["low"].min()) / entry_close)
+                else:
+                    forward_return = 1.0 - float(bars.loc[end, "close"]) / entry_close
+                    mfe = max(0.0, 1.0 - float(future["low"].min()) / entry_close)
+                    mae = max(0.0, float(future["high"].max()) / entry_close - 1.0)
+                records.append(
+                    {
+                        "strategy_id": signal.strategy_id,
+                        "side": signal.side.value,
+                        "signal_time": pd.Timestamp(signal.signal_time).isoformat(),
+                        "window_bars": window,
+                        "signal_close": entry_close,
+                        "forward_return": forward_return,
+                        "mfe": mfe,
+                        "mae": mae,
+                    }
+                )
+        return tuple(records)
+
+    closes = bars["close"].to_numpy(copy=False)
+    matched_indices = np.asarray([index for _, index in matched_signals], dtype=np.intp)
+    valid_windows = tuple(dict.fromkeys(window for window in windows if 0 < window < len(bars)))
+    eligible_indices = {
+        window: matched_indices + 1
+        for window in valid_windows
+        if np.any(matched_indices + window < len(bars))
+    }
+    future_highs: dict[int, np.ndarray] = {}
+    future_lows: dict[int, np.ndarray] = {}
+    if eligible_indices:
+        highs = bars["high"].to_numpy(copy=False)
+        lows = bars["low"].to_numpy(copy=False)
+        # Reduce only the future windows that can produce output records.
+        for window, future_indices in eligible_indices.items():
+            eligible = matched_indices + window < len(bars)
+            high_view = np.lib.stride_tricks.sliding_window_view(highs, window)
+            low_view = np.lib.stride_tricks.sliding_window_view(lows, window)
+            future_highs[window] = np.full(len(matched_signals), np.nan, dtype=float)
+            future_lows[window] = np.full(len(matched_signals), np.nan, dtype=float)
+            future_highs[window][eligible] = np.fmax.reduce(
+                high_view[future_indices[eligible]],
+                axis=1,
+            )
+            future_lows[window][eligible] = np.fmin.reduce(
+                low_view[future_indices[eligible]],
+                axis=1,
+            )
+
     records: list[dict[str, Any]] = []
-    for signal in signals:
-        index = close_to_index.get(pd.Timestamp(signal.signal_time))
-        if index is None:
-            continue
-        entry_close = float(bars.loc[index, "close"])
+    for matched_position, (signal, index) in enumerate(matched_signals):
+        entry_close = float(closes[index])
         for window in windows:
             end = index + window
             if window <= 0 or end >= len(bars):
                 continue
-            future = bars.iloc[index + 1 : end + 1]
+            high_max = float(future_highs[window][matched_position])
+            low_min = float(future_lows[window][matched_position])
             if signal.side.value == "long":
-                forward_return = float(bars.loc[end, "close"]) / entry_close - 1.0
-                mfe = max(0.0, float(future["high"].max()) / entry_close - 1.0)
-                mae = max(0.0, 1.0 - float(future["low"].min()) / entry_close)
+                forward_return = float(closes[end]) / entry_close - 1.0
+                mfe = max(0.0, high_max / entry_close - 1.0)
+                mae = max(0.0, 1.0 - low_min / entry_close)
             else:
-                forward_return = 1.0 - float(bars.loc[end, "close"]) / entry_close
-                mfe = max(0.0, 1.0 - float(future["low"].min()) / entry_close)
-                mae = max(0.0, float(future["high"].max()) / entry_close - 1.0)
+                forward_return = 1.0 - float(closes[end]) / entry_close
+                mfe = max(0.0, 1.0 - low_min / entry_close)
+                mae = max(0.0, high_max / entry_close - 1.0)
             records.append(
                 {
                     "strategy_id": signal.strategy_id,

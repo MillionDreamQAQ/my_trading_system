@@ -161,6 +161,124 @@ class ReproducibilityTests(unittest.TestCase):
         self.assertEqual(records[0]["mfe"], 0.0)
         self.assertGreater(records[0]["mae"], 0.0)
 
+    def test_signal_quality_preserves_window_order_and_skip_rules(self) -> None:
+        timestamps = pd.date_range("2026-01-01", periods=6, freq="15min", tz="UTC")
+        frame = pd.DataFrame(
+            {
+                "timestamp": timestamps,
+                "open": [100.0, 102.0, 99.0, 101.0, 98.0, 100.0],
+                "high": [101.0, 104.0, 100.0, 103.0, 99.0, 101.0],
+                "low": [99.0, 100.0, 95.0, 98.0, 94.0, 97.0],
+                "close": [100.0, 102.0, 99.0, 101.0, 98.0, 100.0],
+            }
+        )
+        series = normalize_ohlc_frame(
+            frame,
+            InstrumentMetadata(
+                provider="oanda",
+                symbol="XAU_USD",
+                price_basis=PriceBasis.MID,
+            ),
+            "15min",
+        )
+        long_signal = Signal(
+            strategy_id="entry_point_2",
+            side=Direction.LONG,
+            signal_time=series.bars.loc[0, "close_time"],
+            entry_time=series.bars.loc[1, "open_time"],
+            breakout_level=100.0,
+            atr=1.0,
+            reason="test",
+            base_trend="up",
+            medium_trend="up",
+            large_trend="up",
+        )
+        short_signal = Signal(
+            strategy_id="entry_point_2",
+            side=Direction.SHORT,
+            signal_time=series.bars.loc[1, "close_time"],
+            entry_time=series.bars.loc[2, "open_time"],
+            breakout_level=102.0,
+            atr=1.0,
+            reason="test",
+            base_trend="down",
+            medium_trend="down",
+            large_trend="down",
+        )
+        missing_signal = replace(long_signal, signal_time=pd.Timestamp("2026-01-03T00:00:00Z"))
+
+        records = evaluate_signal_quality(
+            series,
+            [long_signal, short_signal, missing_signal],
+            windows=(2, 2, 0, -1, 10, 1),
+        )
+
+        self.assertEqual(
+            [(record["side"], record["window_bars"]) for record in records],
+            [("long", 2), ("long", 2), ("long", 1), ("short", 2), ("short", 2), ("short", 1)],
+        )
+        self.assertEqual(records[0]["signal_close"], 100.0)
+        self.assertAlmostEqual(records[0]["forward_return"], -0.01)
+        self.assertAlmostEqual(records[0]["mfe"], 0.04)
+        self.assertAlmostEqual(records[0]["mae"], 0.05)
+        self.assertAlmostEqual(records[3]["forward_return"], 1.0 - 101.0 / 102.0)
+        self.assertAlmostEqual(records[3]["mfe"], 1.0 - 95.0 / 102.0)
+        self.assertAlmostEqual(records[3]["mae"], 103.0 / 102.0 - 1.0)
+
+    def test_signal_quality_keeps_empty_and_unmatched_inputs_lazy(self) -> None:
+        series = _bars()
+        signal = Signal(
+            strategy_id="entry_point_2",
+            side=Direction.LONG,
+            signal_time=pd.Timestamp("2026-01-03T00:00:00Z"),
+            entry_time=None,
+            breakout_level=100.0,
+            atr=1.0,
+            reason="test",
+            base_trend="up",
+            medium_trend="up",
+            large_trend="up",
+        )
+        series.bars = series.bars[["open_time", "close_time"]]
+
+        self.assertEqual(evaluate_signal_quality(series, []), ())
+        self.assertEqual(evaluate_signal_quality(series, [signal]), ())
+
+    def test_signal_quality_preserves_object_price_column_behavior(self) -> None:
+        timestamps = pd.date_range("2026-01-01", periods=3, freq="15min", tz="UTC")
+        series = normalize_ohlc_frame(
+            pd.DataFrame(
+                {
+                    "timestamp": timestamps,
+                    "open": [8.0, 7.0, 6.0],
+                    "high": [9.0, 10.0, 8.0],
+                    "low": [7.0, 6.0, 5.0],
+                    "close": [8.0, 7.0, 6.0],
+                }
+            ),
+            InstrumentMetadata(provider="oanda", symbol="XAU_USD", price_basis=PriceBasis.MID),
+            "15min",
+        )
+        for column in ("high", "low", "close"):
+            series.bars[column] = series.bars[column].astype(str)
+        signal = Signal(
+            strategy_id="entry_point_2",
+            side=Direction.LONG,
+            signal_time=series.bars.loc[0, "close_time"],
+            entry_time=series.bars.loc[1, "open_time"],
+            breakout_level=8.0,
+            atr=1.0,
+            reason="test",
+            base_trend="up",
+            medium_trend="up",
+            large_trend="up",
+        )
+
+        records = evaluate_signal_quality(series, [signal], windows=(2,))
+
+        self.assertEqual(records[0]["mfe"], 0.0)
+        self.assertAlmostEqual(records[0]["mae"], 1.0 - 5.0 / 8.0)
+
     def test_research_uses_oanda_point_value_for_backtest(self) -> None:
         frame = pd.DataFrame(
             {
