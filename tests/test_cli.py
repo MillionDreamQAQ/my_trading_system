@@ -82,7 +82,7 @@ class CliSourceTests(unittest.TestCase):
         with patch.dict(os.environ, {"OANDA_API_TOKEN": "test-token"}, clear=False):
             with patch(
                 "gold_research.cli.load_oanda_candles",
-                return_value=(series, "digest", "data/cache/oanda/test.json"),
+                return_value=(series, "digest", "data/cache/oanda.sqlite3"),
             ) as loader:
                 with patch("gold_research.cli.run_research", side_effect=fake_run_research):
                     with patch("gold_research.cli.write_run_artifacts", return_value="runs/test-run"):
@@ -125,7 +125,7 @@ class CliSourceTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             with patch(
                 "gold_research.cli.load_oanda_candles",
-                return_value=(series, "digest", "data/cache/oanda/cached.json"),
+                return_value=(series, "digest", "data/cache/oanda.sqlite3"),
             ) as loader:
                 with patch("gold_research.cli.run_research", return_value=cached_run):
                     with patch("gold_research.cli.write_run_artifacts", return_value="runs/cached-run"):

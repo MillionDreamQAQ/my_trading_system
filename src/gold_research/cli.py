@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--config", required=True)
     run_parser.add_argument("--start", required=True, help="UTC ISO start for OANDA XAU_USD")
     run_parser.add_argument("--end", required=True, help="UTC ISO end for OANDA XAU_USD")
-    run_parser.add_argument("--oanda-cache-dir", default="data/cache/oanda")
+    run_parser.add_argument("--oanda-database", default="data/cache/oanda.sqlite3")
     run_parser.add_argument("--strategy", choices=["entry_point_2"], required=True)
     run_parser.add_argument("--output-root", default="runs")
 
@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="UTC ISO end of the displayed evaluation window (default: current UTC time)",
     )
     dashboard_parser.add_argument("--warmup-start", help="optional UTC ISO start used only for indicator warm-up")
-    dashboard_parser.add_argument("--oanda-cache-dir", default="data/cache/oanda")
+    dashboard_parser.add_argument("--oanda-database", default="data/cache/oanda.sqlite3")
     dashboard_parser.add_argument("--host", default="127.0.0.1")
     dashboard_parser.add_argument("--port", type=int, default=8000)
     return parser
@@ -86,7 +86,7 @@ def _load_oanda(args, config):
         start=_parse_utc(getattr(args, "warmup_start", None) or args.start),
         end=_parse_utc(args.end),
         token=token,
-        cache_dir=args.oanda_cache_dir,
+        database_path=args.oanda_database,
     )[:2]
 
 
@@ -103,7 +103,7 @@ def _dashboard_loader(args, config):
             start=start,
             end=end,
             token=token,
-            cache_dir=args.oanda_cache_dir,
+            database_path=args.oanda_database,
         )[0]
 
     return load_window

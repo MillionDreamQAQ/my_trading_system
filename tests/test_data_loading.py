@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
+import sqlite3
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -79,7 +80,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                 end=(start + pd.Timedelta(minutes=1)).to_pydatetime(),
                 token="unit-test-token",
                 base_url="https://example.test",
-                cache_dir=temporary,
+                database_path=Path(temporary) / "oanda.sqlite3",
                 session=session,
             )
 
@@ -187,7 +188,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                         end=(start + pd.Timedelta(hours=1)).to_pydatetime(),
                         token="unit-test-token",
                         base_url="https://example.test",
-                        cache_dir=temporary,
+                        database_path=Path(temporary) / "oanda.sqlite3",
                         session=session,
                     )
 
@@ -211,14 +212,15 @@ class OandaDataLoadingTests(unittest.TestCase):
                     end=(start + pd.Timedelta(minutes=15)).to_pydatetime(),
                     token="unit-test-token",
                     base_url="https://example.test",
-                    cache_dir=temporary,
+                    database_path=Path(temporary) / "oanda.sqlite3",
                     session=_FakeSession([]),
                 )
 
-    def test_oanda_cache_is_reused_without_token_and_digest_is_stable(self) -> None:
+    def test_oanda_sqlite_cache_is_reused_without_token_and_digest_is_stable(self) -> None:
         start = pd.Timestamp("2026-01-01T00:00:00Z")
         payload = {"candles": [_oanda_candle(start)]}
         with TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "oanda.sqlite3"
             first_session = _FakeSession([_FakeResponse(payload)])
             first, first_digest, cache_file = load_oanda_candles(
                 "XAU_USD",
@@ -228,11 +230,9 @@ class OandaDataLoadingTests(unittest.TestCase):
                 end=(start + pd.Timedelta(minutes=15)).to_pydatetime(),
                 token="sensitive-unit-test-token",
                 base_url="https://example.test",
-                cache_dir=temporary,
+                database_path=database_path,
                 session=first_session,
             )
-            cached_text = cache_file.read_text(encoding="utf-8")
-            os.utime(cache_file, (0, 0))
 
             second_session = _FakeSession([])
             second, second_digest, second_cache_file = load_oanda_candles(
@@ -242,20 +242,143 @@ class OandaDataLoadingTests(unittest.TestCase):
                 start=start.to_pydatetime(),
                 end=(start + pd.Timedelta(minutes=15)).to_pydatetime(),
                 base_url="https://example.test",
-                cache_dir=temporary,
+                database_path=database_path,
+                session=second_session,
+            )
+
+            self.assertTrue(database_path.is_file())
+            self.assertFalse(list(Path(temporary).glob("*.json")))
+            connection = sqlite3.connect(database_path)
+            try:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM oanda_bars").fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM oanda_coverage").fetchone()[0], 1)
+            finally:
+                connection.close()
+
+        self.assertEqual(len(first_session.calls), 1)
+        self.assertEqual(second_session.calls, [])
+        self.assertEqual(cache_file, database_path)
+        self.assertEqual(second_cache_file, database_path)
+        self.assertEqual(first_digest, second_digest)
+        self.assertEqual(first.bars.to_csv(index=False), second.bars.to_csv(index=False))
+        self.assertEqual(first.metadata.to_dict(), second.metadata.to_dict())
+        self.assertNotIn("token", first.metadata.source_url.lower())
+
+    def test_oanda_sqlite_cache_merges_overlapping_ranges(self) -> None:
+        start = pd.Timestamp("2026-01-01T00:00:00Z")
+        candles = [_oanda_candle(start + index * pd.Timedelta(minutes=15), base=100 + index) for index in range(3)]
+        with TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "oanda.sqlite3"
+            first_session = _FakeSession([_FakeResponse({"candles": candles[:2]})])
+            load_oanda_candles(
+                "XAU_USD",
+                "15min",
+                metadata(),
+                start=start.to_pydatetime(),
+                end=(start + pd.Timedelta(minutes=30)).to_pydatetime(),
+                token="unit-test-token",
+                base_url="https://example.test",
+                database_path=database_path,
+                session=first_session,
+            )
+
+            second_start = start + pd.Timedelta(minutes=15)
+            second_session = _FakeSession([_FakeResponse({"candles": [candles[2]]})])
+            series, _, _ = load_oanda_candles(
+                "XAU_USD",
+                "15min",
+                metadata(),
+                start=second_start.to_pydatetime(),
+                end=(start + pd.Timedelta(minutes=45)).to_pydatetime(),
+                token="unit-test-token",
+                base_url="https://example.test",
+                database_path=database_path,
                 session=second_session,
             )
 
         self.assertEqual(len(first_session.calls), 1)
-        self.assertEqual(second_session.calls, [])
-        self.assertEqual(cache_file, second_cache_file)
-        self.assertEqual(first_digest, second_digest)
-        self.assertEqual(first.bars.to_csv(index=False), second.bars.to_csv(index=False))
-        self.assertEqual(first.metadata.to_dict(), second.metadata.to_dict())
-        self.assertIn("acquired_at", json.loads(cached_text))
-        self.assertNotIn("sensitive-unit-test-token", cached_text)
-        self.assertNotIn("Authorization", cached_text)
-        self.assertNotIn("token", first.metadata.source_url.lower())
+        self.assertEqual(len(second_session.calls), 1)
+        self.assertEqual(len(series.bars), 2)
+
+    def test_oanda_sqlite_cache_does_not_mark_incomplete_tail_as_covered(self) -> None:
+        start = pd.Timestamp("2026-01-01T00:00:00Z")
+        with TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "oanda.sqlite3"
+            first_session = _FakeSession(
+                [
+                    _FakeResponse(
+                        {
+                            "candles": [
+                                _oanda_candle(start),
+                                _oanda_candle(start + pd.Timedelta(minutes=15), complete=False),
+                            ]
+                        }
+                    )
+                ]
+            )
+            first, _, _ = load_oanda_candles(
+                "XAU_USD",
+                "15min",
+                metadata(),
+                start=start.to_pydatetime(),
+                end=(start + pd.Timedelta(minutes=30)).to_pydatetime(),
+                token="unit-test-token",
+                base_url="https://example.test",
+                database_path=database_path,
+                session=first_session,
+            )
+
+            second_session = _FakeSession(
+                [_FakeResponse({"candles": [_oanda_candle(start + pd.Timedelta(minutes=15), base=101.0)]})]
+            )
+            second, _, _ = load_oanda_candles(
+                "XAU_USD",
+                "15min",
+                metadata(),
+                start=start.to_pydatetime(),
+                end=(start + pd.Timedelta(minutes=30)).to_pydatetime(),
+                token="unit-test-token",
+                base_url="https://example.test",
+                database_path=database_path,
+                session=second_session,
+            )
+
+        self.assertEqual(len(first.bars), 1)
+        self.assertEqual(len(second_session.calls), 1)
+        self.assertEqual(len(second.bars), 2)
+
+    def test_oanda_sqlite_cache_does_not_mark_an_empty_response_as_covered(self) -> None:
+        start = pd.Timestamp("2026-01-01T00:00:00Z")
+        with TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "oanda.sqlite3"
+            with self.assertRaisesRegex(DataSourceError, "no complete candles"):
+                load_oanda_candles(
+                    "XAU_USD",
+                    "15min",
+                    metadata(),
+                    start=start.to_pydatetime(),
+                    end=(start + pd.Timedelta(minutes=15)).to_pydatetime(),
+                    token="unit-test-token",
+                    base_url="https://example.test",
+                    database_path=database_path,
+                    session=_FakeSession([_FakeResponse({"candles": []})]),
+                )
+
+            session = _FakeSession([_FakeResponse({"candles": [_oanda_candle(start)]})])
+            series, _, _ = load_oanda_candles(
+                "XAU_USD",
+                "15min",
+                metadata(),
+                start=start.to_pydatetime(),
+                end=(start + pd.Timedelta(minutes=15)).to_pydatetime(),
+                token="unit-test-token",
+                base_url="https://example.test",
+                database_path=database_path,
+                session=session,
+            )
+
+        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(len(series.bars), 1)
 
     def test_oanda_paginates_after_5000_candles(self) -> None:
         start = pd.Timestamp("2026-01-01T00:00:00Z")
@@ -280,7 +403,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                 end=(second_timestamp + pd.Timedelta(minutes=15)).to_pydatetime(),
                 token="unit-test-token",
                 base_url="https://example.test",
-                cache_dir=temporary,
+                database_path=Path(temporary) / "oanda.sqlite3",
                 session=session,
             )
 
@@ -316,7 +439,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                 end=(start + 6 * pd.Timedelta(minutes=15)).to_pydatetime(),
                 token="unit-test-token",
                 base_url="https://example.test",
-                cache_dir=temporary,
+                database_path=Path(temporary) / "oanda.sqlite3",
                 session=session,
             )
 
@@ -343,7 +466,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                 end=pd.Timestamp("2026-06-19T21:00:00Z").to_pydatetime(),
                 token="unit-test-token",
                 base_url="https://example.test",
-                cache_dir=temporary,
+                database_path=Path(temporary) / "oanda.sqlite3",
                 session=session,
             )
 
@@ -362,7 +485,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                     end=(start + pd.Timedelta(minutes=15)).to_pydatetime(),
                     token="invalid-unit-test-token",
                     base_url="https://example.test",
-                    cache_dir=temporary,
+                    database_path=Path(temporary) / "oanda.sqlite3",
                     session=_FakeSession([_FakeResponse(status_code=401)]),
                 )
 
@@ -377,7 +500,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                         end=(start + pd.Timedelta(minutes=15)).to_pydatetime(),
                         token="unit-test-token",
                         base_url="https://example.test",
-                        cache_dir=temporary,
+                        database_path=Path(temporary) / "oanda.sqlite3",
                         session=rate_limited,
                     )
             self.assertEqual(len(rate_limited.calls), 3)
@@ -397,7 +520,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                     end=(start + pd.Timedelta(minutes=15)).to_pydatetime(),
                     token="unit-test-token",
                     base_url="https://example.test",
-                    cache_dir=temporary,
+                    database_path=Path(temporary) / "oanda.sqlite3",
                     session=_FakeSession([_FakeResponse({"candles": [invalid]})]),
                 )
 
@@ -427,7 +550,7 @@ class OandaDataLoadingTests(unittest.TestCase):
                         end=(start + pd.Timedelta(minutes=30)).to_pydatetime(),
                         token="unit-test-token",
                         base_url="https://example.test",
-                        cache_dir=temporary,
+                        database_path=Path(temporary) / "oanda.sqlite3",
                         session=_FakeSession([_FakeResponse({"candles": candles})]),
                     )
 

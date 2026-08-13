@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,19 +78,231 @@ def _oanda_time(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _oanda_cache_payload(path: Path) -> tuple[dict[str, Any], bytes]:
-    raw = path.read_bytes()
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise DataSourceError(f"cached OANDA response is invalid JSON: {path}") from exc
-    if (
-        not isinstance(payload, dict)
-        or not isinstance(payload.get("pages"), list)
-        or not isinstance(payload.get("acquired_at"), str)
-    ):
-        raise DataSourceError(f"cached OANDA response has an invalid shape: {path}")
-    return payload, raw
+def _timestamp_ns(value: object, message: str) -> int:
+    return int(_utc_timestamp(value, message).value)
+
+
+def _open_oanda_database(path: str | Path) -> sqlite3.Connection:
+    database_path = Path(path)
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database_path, timeout=30.0)
+    connection.execute("PRAGMA busy_timeout = 30000")
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute("PRAGMA synchronous = NORMAL")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS oanda_bars (
+            base_url TEXT NOT NULL,
+            instrument TEXT NOT NULL,
+            granularity TEXT NOT NULL,
+            price_basis TEXT NOT NULL,
+            timestamp_ns INTEGER NOT NULL,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            volume INTEGER,
+            PRIMARY KEY (base_url, instrument, granularity, price_basis, timestamp_ns)
+        );
+
+        CREATE TABLE IF NOT EXISTS oanda_coverage (
+            base_url TEXT NOT NULL,
+            instrument TEXT NOT NULL,
+            granularity TEXT NOT NULL,
+            price_basis TEXT NOT NULL,
+            start_ns INTEGER NOT NULL,
+            end_ns INTEGER NOT NULL,
+            acquired_at TEXT NOT NULL,
+            PRIMARY KEY (base_url, instrument, granularity, price_basis, start_ns, end_ns),
+            CHECK (end_ns > start_ns)
+        );
+
+        CREATE INDEX IF NOT EXISTS oanda_coverage_lookup
+            ON oanda_coverage (base_url, instrument, granularity, price_basis, start_ns, end_ns);
+        """
+    )
+    connection.commit()
+    return connection
+
+
+def _dataset_key(
+    *,
+    base_url: str,
+    instrument: str,
+    granularity: str,
+    price_parameter: str,
+) -> tuple[str, str, str, str]:
+    return base_url, instrument, granularity, price_parameter
+
+
+def _covered_windows(
+    connection: sqlite3.Connection,
+    dataset: tuple[str, str, str, str],
+    start_ns: int,
+    end_ns: int,
+) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    rows = connection.execute(
+        """
+        SELECT start_ns, end_ns
+        FROM oanda_coverage
+        WHERE base_url = ?
+          AND instrument = ?
+          AND granularity = ?
+          AND price_basis = ?
+          AND start_ns < ?
+          AND end_ns > ?
+        ORDER BY start_ns
+        """,
+        (*dataset, end_ns, start_ns),
+    ).fetchall()
+    return [
+        (
+            pd.Timestamp(int(row[0]), unit="ns", tz="UTC"),
+            pd.Timestamp(int(row[1]), unit="ns", tz="UTC"),
+        )
+        for row in rows
+    ]
+
+
+def _missing_windows(
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    covered: list[tuple[pd.Timestamp, pd.Timestamp]],
+) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    missing: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+    covered_until = start
+    for window_start, window_end in sorted(covered):
+        if window_end <= covered_until:
+            continue
+        if window_start > covered_until:
+            missing.append((covered_until, min(window_start, end)))
+        covered_until = max(covered_until, window_end)
+        if covered_until >= end:
+            break
+    if covered_until < end:
+        missing.append((covered_until, end))
+    return [(left, right) for left, right in missing if right > left]
+
+
+def _latest_acquired_at(
+    connection: sqlite3.Connection,
+    dataset: tuple[str, str, str, str],
+    start_ns: int,
+    end_ns: int,
+) -> str:
+    row = connection.execute(
+        """
+        SELECT MAX(acquired_at)
+        FROM oanda_coverage
+        WHERE base_url = ?
+          AND instrument = ?
+          AND granularity = ?
+          AND price_basis = ?
+          AND start_ns < ?
+          AND end_ns > ?
+        """,
+        (*dataset, end_ns, start_ns),
+    ).fetchone()
+    if not row or not row[0]:
+        raise DataSourceError("OANDA database has no acquisition metadata for the requested range")
+    return str(row[0])
+
+
+def _store_oanda_frame(
+    connection: sqlite3.Connection,
+    frame: pd.DataFrame,
+    *,
+    dataset: tuple[str, str, str, str],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    acquired_at: str,
+) -> None:
+    rows: list[tuple[Any, ...]] = []
+    for record in frame.to_dict(orient="records"):
+        volume = record.get("volume")
+        rows.append(
+            (
+                *dataset,
+                _timestamp_ns(record["timestamp"], "OANDA response contains an invalid candle timestamp"),
+                float(record["open"]),
+                float(record["high"]),
+                float(record["low"]),
+                float(record["close"]),
+                None if volume is None or pd.isna(volume) else int(volume),
+            )
+        )
+    connection.executemany(
+        """
+        INSERT INTO oanda_bars (
+            base_url, instrument, granularity, price_basis, timestamp_ns,
+            open, high, low, close, volume
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (base_url, instrument, granularity, price_basis, timestamp_ns)
+        DO UPDATE SET
+            open = excluded.open,
+            high = excluded.high,
+            low = excluded.low,
+            close = excluded.close,
+            volume = excluded.volume
+        """,
+        rows,
+    )
+    connection.execute(
+        """
+        INSERT INTO oanda_coverage (
+            base_url, instrument, granularity, price_basis,
+            start_ns, end_ns, acquired_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (base_url, instrument, granularity, price_basis, start_ns, end_ns)
+        DO UPDATE SET acquired_at = excluded.acquired_at
+        """,
+        (*dataset, _timestamp_ns(start, "OANDA start timestamp is invalid"), _timestamp_ns(end, "OANDA end timestamp is invalid"), acquired_at),
+    )
+    connection.commit()
+
+
+def _read_oanda_frame(
+    connection: sqlite3.Connection,
+    *,
+    dataset: tuple[str, str, str, str],
+    start_ns: int,
+    end_ns: int,
+) -> pd.DataFrame:
+    rows = connection.execute(
+        """
+        SELECT timestamp_ns, open, high, low, close, volume
+        FROM oanda_bars
+        WHERE base_url = ?
+          AND instrument = ?
+          AND granularity = ?
+          AND price_basis = ?
+          AND timestamp_ns >= ?
+          AND timestamp_ns < ?
+        ORDER BY timestamp_ns
+        """,
+        (*dataset, start_ns, end_ns),
+    ).fetchall()
+    if not rows:
+        raise DataSourceError("OANDA returned no complete candles in the requested range")
+    frame = pd.DataFrame(
+        rows,
+        columns=["timestamp_ns", "open", "high", "low", "close", "volume"],
+    )
+    frame["timestamp"] = pd.to_datetime(frame.pop("timestamp_ns"), unit="ns", utc=True)
+    if frame["volume"].isna().all():
+        frame = frame.drop(columns=["volume"])
+    columns = ["timestamp", "open", "high", "low", "close"]
+    if "volume" in frame:
+        columns.append("volume")
+    return frame[columns]
+
+
+def _series_digest(series: BarSeries) -> str:
+    digest = hashlib.sha256()
+    digest.update(json.dumps(series.metadata.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    digest.update(series.timeframe.encode("utf-8"))
+    digest.update(series.bars.to_csv(index=False, date_format="%Y-%m-%dT%H:%M:%S%z").encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _oanda_page(
@@ -133,7 +346,14 @@ def _oanda_page(
     raise DataSourceError(f"OANDA request failed: {last_error}") from last_error
 
 
-def _oanda_frame(pages: list[dict[str, Any]], price_key: str, start: datetime, end: datetime) -> pd.DataFrame:
+def _oanda_frame(
+    pages: list[dict[str, Any]],
+    price_key: str,
+    start: datetime,
+    end: datetime,
+    *,
+    allow_empty: bool = False,
+) -> pd.DataFrame:
     records: list[dict[str, Any]] = []
     start_timestamp = pd.Timestamp(start)
     end_timestamp = pd.Timestamp(end)
@@ -160,7 +380,7 @@ def _oanda_frame(pages: list[dict[str, Any]], price_key: str, start: datetime, e
             if "volume" in candle:
                 record["volume"] = candle["volume"]
             records.append(record)
-    if not records:
+    if not records and not allow_empty:
         raise DataSourceError("OANDA returned no complete candles in the requested range")
     # Keep the provider's order and duplicates intact so the canonical data
     # validator can reject an anomalous response instead of silently repairing it.
@@ -209,15 +429,16 @@ def load_oanda_candles(
     end: datetime,
     token: str | None = None,
     base_url: str = "https://api-fxpractice.oanda.com",
-    cache_dir: str | Path = "data/cache/oanda",
+    database_path: str | Path = "data/cache/oanda.sqlite3",
     timeout: float = 30.0,
     session: requests.Session | None = None,
 ) -> tuple[BarSeries, str, Path]:
     """Load complete OANDA XAU_USD candles with deterministic pagination.
 
     The adapter calls only OANDA's read-only candle endpoint. The API token is
-    read from ``OANDA_API_TOKEN`` when omitted and is excluded from metadata,
-    cache keys, and cached payloads.
+    read from ``OANDA_API_TOKEN`` when omitted. Complete candles are stored in
+    a local SQLite database and are reused by timestamp range; raw JSON
+    responses are never written to disk.
     """
 
     canonical_instrument = instrument.strip().upper()
@@ -236,114 +457,144 @@ def load_oanda_candles(
         "instrument": canonical_instrument,
         "granularity": granularity,
         "price": price_parameter,
-        # Older cache entries treated a short OANDA page as the end of the
-        # requested range. Keep them isolated because they may be truncated.
         "pagination": "cover-request-end-v2",
         "start": _oanda_time(start_dt),
         "end": _oanda_time(end_dt),
     }
-    cache_path = Path(cache_dir)
-    cache_path.mkdir(parents=True, exist_ok=True)
-    identity_hash = hashlib.sha256(
-        json.dumps(request_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()[:16]
-    cache_file = cache_path / f"{canonical_instrument}_{granularity}_{price_parameter}_{identity_hash}.json"
-
-    if cache_file.exists():
-        cached, raw = _oanda_cache_payload(cache_file)
-        if cached.get("request") != request_identity:
-            raise DataSourceError(f"cached OANDA response does not match its request: {cache_file}")
-        pages = cached["pages"]
-        acquired_at = cached["acquired_at"]
-    else:
-        access_token = token or os.environ.get("OANDA_API_TOKEN", "").strip()
-        if not access_token:
-            raise DataSourceError("OANDA_API_TOKEN is not set")
+    database_file = Path(database_path)
+    dataset = _dataset_key(
+        base_url=base_url.rstrip("/"),
+        instrument=canonical_instrument,
+        granularity=granularity,
+        price_parameter=price_parameter,
+    )
+    start_timestamp = pd.Timestamp(start_dt)
+    end_timestamp = pd.Timestamp(end_dt)
+    start_ns = _timestamp_ns(start_timestamp, "OANDA start timestamp is invalid")
+    end_ns = _timestamp_ns(end_timestamp, "OANDA end timestamp is invalid")
+    connection = _open_oanda_database(database_file)
+    try:
+        covered = _covered_windows(connection, dataset, start_ns, end_ns)
+        missing = _missing_windows(start_timestamp, end_timestamp, covered)
+        access_token = token or os.environ.get("OANDA_API_TOKEN", "").strip() or None
         client = session or requests.Session()
-        pages: list[dict[str, Any]] = []
-        current_start = start_dt
-        requested_end = pd.Timestamp(end_dt)
         bar_delta = _time_delta(timeframe)
-        first_page = True
-        for _ in range(10000):
-            params = {
-                "from": _oanda_time(current_start),
-                "granularity": granularity,
-                "price": price_parameter,
-                "count": OANDA_MAX_CANDLES,
-                "includeFirst": "true" if first_page else "false",
-                "smooth": "false",
-            }
-            page = _oanda_page(client, endpoint, params, access_token, timeout=timeout)
-            page_candles = page.get("candles")
-            if not isinstance(page_candles, list):
-                raise DataSourceError("OANDA response is missing candles")
-            pages.append(page)
-            # A follow-up request can be empty when the requested tail falls
-            # in an OANDA market closure. Returned complete candles remain
-            # the authoritative historical series; only an entirely empty
-            # request is rejected after normalization below.
-            if not page_candles:
-                break
-            # A trailing incomplete candle denotes the provider's current
-            # partial interval. It cannot be used for historical research and
-            # there is no later complete candle to request.
-            if any(isinstance(candle, dict) and candle.get("complete") is False for candle in page_candles):
-                break
-            last_candle = page_candles[-1]
-            if not isinstance(last_candle, dict) or "time" not in last_candle:
-                raise DataSourceError("OANDA returned no candles before the requested end")
-            last_time = _utc_timestamp(last_candle["time"], "OANDA response contains an invalid candle timestamp")
-            # OANDA can return fewer than ``count`` candles even when later
-            # historical candles exist. Continue until the final returned bar
-            # covers the requested end; page size alone is not a completion
-            # signal.
-            if last_time + bar_delta >= requested_end:
-                break
-            # OANDA excludes the `from` candle when includeFirst=false, so
-            # resume at the final returned timestamp without skipping a bar.
-            next_start = last_time.to_pydatetime()
-            if next_start <= current_start:
-                # Retain malformed page data so the canonical validator can
-                # report duplicate or unsorted timestamps to the caller.
-                break
-            current_start = next_start
-            first_page = False
-        else:
-            raise DataSourceError("OANDA pagination exceeded the safety limit")
 
-        acquired_at = datetime.now(timezone.utc).isoformat()
-        cache_payload = {
-            "request": request_identity,
-            "pages": pages,
-            "acquired_at": acquired_at,
-        }
-        raw_to_write = json.dumps(cache_payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        temporary = cache_file.with_suffix(".tmp")
-        temporary.write_bytes(raw_to_write)
-        temporary.replace(cache_file)
-        raw = cache_file.read_bytes()
+        for missing_start, missing_end in missing:
+            if not access_token:
+                raise DataSourceError("OANDA_API_TOKEN is not set")
+            pages: list[dict[str, Any]] = []
+            current_start = missing_start.to_pydatetime()
+            requested_end = pd.Timestamp(missing_end)
+            first_page = True
+            coverage_end = requested_end
+            saw_incomplete = False
+            for _ in range(10000):
+                params = {
+                    "from": _oanda_time(current_start),
+                    "granularity": granularity,
+                    "price": price_parameter,
+                    "count": OANDA_MAX_CANDLES,
+                    "includeFirst": "true" if first_page else "false",
+                    "smooth": "false",
+                }
+                page = _oanda_page(client, endpoint, params, access_token, timeout=timeout)
+                page_candles = page.get("candles")
+                if not isinstance(page_candles, list):
+                    raise DataSourceError("OANDA response is missing candles")
+                pages.append(page)
+                if not page_candles:
+                    break
+                if any(isinstance(candle, dict) and candle.get("complete") is False for candle in page_candles):
+                    saw_incomplete = True
+                    break
+                last_candle = page_candles[-1]
+                if not isinstance(last_candle, dict) or "time" not in last_candle:
+                    raise DataSourceError("OANDA returned no candles before the requested end")
+                last_time = _utc_timestamp(last_candle["time"], "OANDA response contains an invalid candle timestamp")
+                if last_time + bar_delta >= requested_end:
+                    break
+                next_start = last_time.to_pydatetime()
+                if next_start <= current_start:
+                    break
+                current_start = next_start
+                first_page = False
+            else:
+                raise DataSourceError("OANDA pagination exceeded the safety limit")
 
-    frame = _oanda_frame(pages, price_key, start_dt, end_dt)
-    series = normalize_ohlc_frame(
-        frame,
-        _oanda_metadata(
-            metadata,
-            instrument=canonical_instrument,
-            timeframe=timeframe,
-            endpoint=endpoint,
-            request=request_identity,
-            frame=frame,
-            acquired_at=acquired_at,
-        ),
-        timeframe,
-    )
-    issues = validate_bar_series(
-        series,
-        expected_interval=timeframe,
-        raise_on_error=False,
-    )
-    series.quality_issues.extend(issues)
-    if issues:
-        raise DataValidationError(issues)
-    return series, hashlib.sha256(raw).hexdigest(), cache_file
+            acquired_at = datetime.now(timezone.utc).isoformat()
+            frame = _oanda_frame(
+                pages,
+                price_key,
+                missing_start.to_pydatetime(),
+                missing_end.to_pydatetime(),
+                allow_empty=True,
+            )
+            if saw_incomplete:
+                coverage_end = (
+                    min(requested_end, pd.Timestamp(frame["timestamp"].max()) + bar_delta)
+                    if not frame.empty
+                    else missing_start
+                )
+            if not frame.empty:
+                fetched_series = normalize_ohlc_frame(
+                    frame,
+                    _oanda_metadata(
+                        metadata,
+                        instrument=canonical_instrument,
+                        timeframe=timeframe,
+                        endpoint=endpoint,
+                        request=request_identity,
+                        frame=frame,
+                        acquired_at=acquired_at,
+                    ),
+                    timeframe,
+                )
+                fetched_issues = validate_bar_series(
+                    fetched_series,
+                    expected_interval=timeframe,
+                    raise_on_error=False,
+                )
+                if fetched_issues:
+                    raise DataValidationError(fetched_issues)
+            if not frame.empty and coverage_end > missing_start:
+                _store_oanda_frame(
+                    connection,
+                    frame,
+                    dataset=dataset,
+                    start=missing_start,
+                    end=coverage_end,
+                    acquired_at=acquired_at,
+                )
+
+        frame = _read_oanda_frame(
+            connection,
+            dataset=dataset,
+            start_ns=start_ns,
+            end_ns=end_ns,
+        )
+        acquired_at = _latest_acquired_at(connection, dataset, start_ns, end_ns)
+        series = normalize_ohlc_frame(
+            frame,
+            _oanda_metadata(
+                metadata,
+                instrument=canonical_instrument,
+                timeframe=timeframe,
+                endpoint=endpoint,
+                request=request_identity,
+                frame=frame,
+                acquired_at=acquired_at,
+            ),
+            timeframe,
+        )
+        issues = validate_bar_series(
+            series,
+            expected_interval=timeframe,
+            raise_on_error=False,
+        )
+        series.quality_issues.extend(issues)
+        if issues:
+            raise DataValidationError(issues)
+        return series, _series_digest(series), database_file
+    finally:
+        connection.close()

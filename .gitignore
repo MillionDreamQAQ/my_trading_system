@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 venv/
 data/cache/
+data/cache/*.sqlite3
 runs/*
 !runs/.gitkeep
 
