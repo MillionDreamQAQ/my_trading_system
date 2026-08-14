@@ -7,6 +7,7 @@ import pandas as pd
 
 from ..config import ResearchConfig
 from ..domain import Direction, Signal
+from .breakout_quality import breakout_quality_masks
 
 
 _NAT_I8 = np.iinfo(np.int64).min
@@ -103,6 +104,9 @@ def detect_entry_point_2(context: pd.DataFrame, config: ResearchConfig) -> list[
     closes = context["close"].to_numpy(copy=False)
     long_mask = long_allowed & all_up & pd.notna(long_level_values) & (closes > long_level_values)
     short_mask = short_allowed & all_down & pd.notna(short_level_values) & (closes < short_level_values)
+    quality_long, quality_short = breakout_quality_masks(context, config.entry_point_2)
+    long_mask &= quality_long
+    short_mask &= quality_short
     if length > 1:
         long_mask[1:] &= pd.isna(long_level_values[:-1]) | (closes[:-1] <= long_level_values[:-1])
         short_mask[1:] &= pd.isna(short_level_values[:-1]) | (closes[:-1] >= short_level_values[:-1])

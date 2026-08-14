@@ -44,6 +44,15 @@ def _positive_float(value: Any, name: str, allow_zero: bool = False) -> float:
     return result
 
 
+def _unit_interval(value: Any, name: str, *, allow_zero: bool = False) -> float:
+    result = _positive_float(value, name, allow_zero=allow_zero)
+    if result > 1:
+        raise ConfigError(f"{name} must be between 0 and 1")
+    if not allow_zero and result == 0:
+        raise ConfigError(f"{name} must be greater than 0")
+    return result
+
+
 def _boolean(value: Any, name: str) -> bool:
     if not isinstance(value, bool):
         raise ConfigError(f"{name} must be a boolean")
@@ -88,6 +97,17 @@ class TrendConfig:
 class EntryPoint2Config:
     enabled: bool
     breakout_lookback: int
+    # Breakout-quality filters are opt-in so older research fixtures keep their
+    # original signal contract. The baseline configuration enables all three.
+    volume_filter_enabled: bool = False
+    volume_multiplier: float = 1.5
+    kline_quality_enabled: bool = False
+    min_body_ratio: float = 0.65
+    max_close_extreme_ratio: float = 0.20
+    squeeze_filter_enabled: bool = False
+    squeeze_lookback: int = 50
+    squeeze_recent_bars: int = 5
+    squeeze_percentile: float = 0.30
 
 
 @dataclass(frozen=True)
@@ -104,6 +124,11 @@ class RiskConfig:
     stop_atr: float
     target_atr: float
     max_hold_bars: int
+    structural_stop_enabled: bool = False
+    structural_stop_buffer_atr: float = 0.5
+    swing_lookback: int = 20
+    breakeven_enabled: bool = False
+    breakeven_trigger_atr: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -254,6 +279,53 @@ class ResearchConfig:
         except ValueError as exc:
             raise ConfigError("strategy.direction must be long, short, or both") from exc
 
+        entry2_config = EntryPoint2Config(
+            enabled=_boolean(_required(entry2, "enabled", "entry_point_2"), "entry_point_2.enabled"),
+            breakout_lookback=_positive_int(
+                _required(entry2, "breakout_lookback", "entry_point_2"),
+                "entry_point_2.breakout_lookback",
+            ),
+            volume_filter_enabled=_boolean(
+                entry2.get("volume_filter_enabled", False),
+                "entry_point_2.volume_filter_enabled",
+            ),
+            volume_multiplier=_positive_float(
+                entry2.get("volume_multiplier", 1.5),
+                "entry_point_2.volume_multiplier",
+            ),
+            kline_quality_enabled=_boolean(
+                entry2.get("kline_quality_enabled", False),
+                "entry_point_2.kline_quality_enabled",
+            ),
+            min_body_ratio=_unit_interval(
+                entry2.get("min_body_ratio", 0.65),
+                "entry_point_2.min_body_ratio",
+            ),
+            max_close_extreme_ratio=_unit_interval(
+                entry2.get("max_close_extreme_ratio", 0.20),
+                "entry_point_2.max_close_extreme_ratio",
+                allow_zero=True,
+            ),
+            squeeze_filter_enabled=_boolean(
+                entry2.get("squeeze_filter_enabled", False),
+                "entry_point_2.squeeze_filter_enabled",
+            ),
+            squeeze_lookback=_positive_int(
+                entry2.get("squeeze_lookback", 50),
+                "entry_point_2.squeeze_lookback",
+            ),
+            squeeze_recent_bars=_positive_int(
+                entry2.get("squeeze_recent_bars", 5),
+                "entry_point_2.squeeze_recent_bars",
+            ),
+            squeeze_percentile=_unit_interval(
+                entry2.get("squeeze_percentile", 0.30),
+                "entry_point_2.squeeze_percentile",
+            ),
+        )
+        if entry2_config.squeeze_recent_bars > entry2_config.squeeze_lookback:
+            raise ConfigError("entry_point_2.squeeze_recent_bars must not exceed squeeze_lookback")
+
         return cls(
             instrument=InstrumentConfig(
                 symbol=symbol,
@@ -272,13 +344,7 @@ class ResearchConfig:
             ),
             timeframes=TimeframeConfig(tf_base, tf_medium, tf_large, tf_timezone),
             trend=trend_config,
-            entry_point_2=EntryPoint2Config(
-                enabled=_boolean(_required(entry2, "enabled", "entry_point_2"), "entry_point_2.enabled"),
-                breakout_lookback=_positive_int(
-                    _required(entry2, "breakout_lookback", "entry_point_2"),
-                    "entry_point_2.breakout_lookback",
-                ),
-            ),
+            entry_point_2=entry2_config,
             entry_point_3=EntryPoint3Config(
                 enabled=_boolean(_required(entry3, "enabled", "entry_point_3"), "entry_point_3.enabled"),
                 pullback_min_atr=_positive_float(
@@ -299,6 +365,26 @@ class ResearchConfig:
                 stop_atr=_positive_float(_required(risk, "stop_atr", "risk"), "risk.stop_atr"),
                 target_atr=_positive_float(_required(risk, "target_atr", "risk"), "risk.target_atr"),
                 max_hold_bars=_positive_int(_required(risk, "max_hold_bars", "risk"), "risk.max_hold_bars"),
+                structural_stop_enabled=_boolean(
+                    risk.get("structural_stop_enabled", False),
+                    "risk.structural_stop_enabled",
+                ),
+                structural_stop_buffer_atr=_positive_float(
+                    risk.get("structural_stop_buffer_atr", 0.5),
+                    "risk.structural_stop_buffer_atr",
+                ),
+                swing_lookback=_positive_int(
+                    risk.get("swing_lookback", 20),
+                    "risk.swing_lookback",
+                ),
+                breakeven_enabled=_boolean(
+                    risk.get("breakeven_enabled", False),
+                    "risk.breakeven_enabled",
+                ),
+                breakeven_trigger_atr=_positive_float(
+                    risk.get("breakeven_trigger_atr", 1.5),
+                    "risk.breakeven_trigger_atr",
+                ),
             ),
             costs=CostConfig(
                 spread_model=str(costs["spread_model"]),

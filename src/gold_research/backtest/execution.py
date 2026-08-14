@@ -65,8 +65,10 @@ class _Position:
     leverage: float
     stop_price: float
     target_price: float
+    initial_stop_price: float
     mfe: float = 0.0
     mae: float = 0.0
+    breakeven_triggered: bool = False
 
 
 def _datetime_values(series: pd.Series) -> tuple[object, tuple[str, object] | None]:
@@ -100,6 +102,92 @@ def _trigger_quote(open_quote: float, level: float, side: Direction, exit_kind: 
     return min(open_quote, level)
 
 
+def _finite_float(value: object) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if np.isfinite(result) else None
+
+
+def _last_swing_extreme(
+    values: np.ndarray,
+    end_index: int,
+    lookback: int,
+    side: Direction,
+) -> float | None:
+    """Return the latest confirmed swing low/high before ``end_index``.
+
+    A pivot is confirmed by the following closed bar. The breakout bar can
+    therefore confirm a pivot from the immediately preceding bar without
+    becoming part of the structural extreme itself. If no pivot exists in the
+    lookback window, the window extreme is used as a conservative fallback.
+    """
+
+    if end_index <= 0 or end_index > len(values):
+        return None
+    start = max(1, end_index - lookback)
+    for pivot in range(end_index - 1, start - 1, -1):
+        if pivot + 1 >= len(values):
+            continue
+        previous = _finite_float(values[pivot - 1])
+        current = _finite_float(values[pivot])
+        following = _finite_float(values[pivot + 1])
+        if previous is None or current is None or following is None:
+            continue
+        if side is Direction.LONG and current <= previous and current <= following:
+            return current
+        if side is Direction.SHORT and current >= previous and current >= following:
+            return current
+
+    try:
+        window = np.asarray(values[start:end_index], dtype=float)
+    except (TypeError, ValueError):
+        window = pd.to_numeric(pd.Series(values[start:end_index]), errors="coerce").to_numpy(dtype=float)
+    finite = window[np.isfinite(window)]
+    if finite.size == 0:
+        return None
+    return float(finite.min() if side is Direction.LONG else finite.max())
+
+
+def _stop_price(
+    *,
+    close_time_index: pd.Index,
+    lows: np.ndarray,
+    highs: np.ndarray,
+    signal: Signal,
+    entry_price: float,
+    config: ResearchConfig,
+) -> float:
+    """Calculate a structural stop, falling back to the fixed ATR stop."""
+
+    atr = float(signal.atr)
+    if signal.side is Direction.LONG:
+        fixed = entry_price - config.risk.stop_atr * atr
+    else:
+        fixed = entry_price + config.risk.stop_atr * atr
+    if not config.risk.structural_stop_enabled:
+        return fixed
+
+    signal_index = close_time_index.get_indexer([pd.Timestamp(signal.signal_time)])[0]
+    if signal_index < 0:
+        return fixed
+    values = lows if signal.side is Direction.LONG else highs
+    extreme = _last_swing_extreme(
+        values,
+        int(signal_index),
+        config.risk.swing_lookback,
+        signal.side,
+    )
+    if extreme is None:
+        return fixed
+    if signal.side is Direction.LONG:
+        structural = extreme - config.risk.structural_stop_buffer_atr * atr
+        return structural if structural < entry_price else fixed
+    structural = extreme + config.risk.structural_stop_buffer_atr * atr
+    return structural if structural > entry_price else fixed
+
+
 def _trade_from_position(
     position: _Position,
     exit_index: int,
@@ -116,7 +204,7 @@ def _trade_from_position(
     slippage_cost = costs.slippage * 2 * quantity * position.point_value
     commission = costs.round_trip_cost(quantity)
     net = gross - spread_cost - slippage_cost - commission
-    risk = abs(position.entry_price - position.stop_price) * quantity * position.point_value
+    risk = abs(position.entry_price - position.initial_stop_price) * quantity * position.point_value
     notional_value = position.entry_price * quantity * position.point_value
     required_margin = notional_value / position.leverage
     return Trade(
@@ -190,6 +278,7 @@ def run_backtest(
     highs = bars["high"].to_numpy(copy=False)
     lows = bars["low"].to_numpy(copy=False)
     closes = bars["close"].to_numpy(copy=False)
+    close_time_index = pd.Index(bars["close_time"])
     positions: list[_Position] = []
     trades: list[Trade] = []
     unfilled: list[dict[str, object]] = []
@@ -208,11 +297,17 @@ def run_backtest(
                 mid_open = float(opens[index])
                 entry_price = costs.execution_price(mid_open, signal.side, "entry")
                 if signal.side is Direction.LONG:
-                    stop = entry_price - config.risk.stop_atr * signal.atr
                     target = entry_price + config.risk.target_atr * signal.atr
                 else:
-                    stop = entry_price + config.risk.stop_atr * signal.atr
                     target = entry_price - config.risk.target_atr * signal.atr
+                stop = _stop_price(
+                    close_time_index=close_time_index,
+                    lows=lows,
+                    highs=highs,
+                    signal=signal,
+                    entry_price=entry_price,
+                    config=config,
+                )
                 quantity = config.position.quantity_for_entry(entry_price, config.instrument.point_value)
                 positions.append(_Position(
                     signal,
@@ -226,6 +321,7 @@ def run_backtest(
                     config.position.leverage,
                     stop,
                     target,
+                    stop,
                 ))
                 available_slots -= 1
 
@@ -291,6 +387,11 @@ def run_backtest(
                     )
                 )
                 continue
+            if config.risk.breakeven_enabled and not position.breakeven_triggered:
+                breakeven_threshold = config.risk.breakeven_trigger_atr * float(position.signal.atr)
+                if position.mfe >= breakeven_threshold:
+                    position.stop_price = position.entry_price
+                    position.breakeven_triggered = True
             remaining.append(position)
         positions = remaining
 

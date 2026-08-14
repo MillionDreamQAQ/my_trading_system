@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import unittest
 
 import pandas as pd
@@ -119,6 +120,20 @@ class EntryPoint2Tests(unittest.TestCase):
             self.assertEqual(signals[0].entry_time, typed_context.loc[5, "open_time"])
             self.assertEqual(signals[0].medium_source_close_time, typed_context.loc[4, "medium_source_close_time"])
             self.assertEqual(signals[0].large_source_close_time, typed_context.loc[4, "large_source_close_time"])
+
+    def test_breakout_quality_filter_is_applied_to_signal_candidates(self) -> None:
+        context = _context([100.0] * 20 + [101.0, 101.2])
+        context["volume"] = [100.0] * 20 + [151.0, 100.0]
+        config = _config()
+        config = replace(
+            config,
+            entry_point_2=replace(config.entry_point_2, volume_filter_enabled=True),
+        )
+
+        signals = detect_entry_point_2(context, config)
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].signal_time, context.loc[20, "signal_time"])
 
     def test_same_bar_long_signal_precedes_short_signal(self) -> None:
         context = _context([100, 100, 100, 100, 100])

@@ -22,6 +22,11 @@ class ConfigContractTests(unittest.TestCase):
         self.assertEqual(config.timeframes.medium, "5min")
         self.assertEqual(config.timeframes.large, "30min")
         self.assertEqual(config.risk.max_hold_bars, 80)
+        self.assertTrue(config.risk.structural_stop_enabled)
+        self.assertEqual(config.risk.structural_stop_buffer_atr, 0.5)
+        self.assertEqual(config.risk.swing_lookback, 20)
+        self.assertTrue(config.risk.breakeven_enabled)
+        self.assertEqual(config.risk.breakeven_trigger_atr, 1.5)
         self.assertIsNone(config.position.lots)
         self.assertEqual(config.position.margin_per_trade, 1000.0)
         self.assertEqual(config.position.units_per_lot, 100.0)
@@ -54,6 +59,9 @@ class ConfigContractTests(unittest.TestCase):
             ("instrument", "point_value", True),
             ("instrument", "tick_size", math.nan),
             ("risk", "stop_atr", math.inf),
+            ("risk", "structural_stop_buffer_atr", 0.0),
+            ("risk", "swing_lookback", 0),
+            ("risk", "breakeven_trigger_atr", math.inf),
             ("costs", "spread_value", False),
             ("position", "lots", 0.0),
             ("position", "margin_per_trade", 0.0),
@@ -83,6 +91,8 @@ class ConfigContractTests(unittest.TestCase):
         variants = (
             ("entry_point_2", "enabled"),
             ("entry_point_3", "enabled"),
+            ("risk", "structural_stop_enabled"),
+            ("risk", "breakeven_enabled"),
             ("costs", "require_explicit_costs"),
         )
         for section, field in variants:

@@ -8,6 +8,7 @@ import pandas as pd
 
 from ..config import ResearchConfig
 from ..domain import Direction, Signal
+from .breakout_quality import breakout_quality_masks
 from .state_machine import Setup, SetupState
 
 
@@ -100,6 +101,7 @@ def detect_entry_point_3(context: pd.DataFrame, config: ResearchConfig) -> Entry
     all_up = frame["all_up"].to_numpy(copy=False) if long_allowed else None
     all_down = frame["all_down"].to_numpy(copy=False) if short_allowed else None
     atrs = frame["atr"].to_numpy(copy=False) if "atr" in frame else None
+    quality_long, quality_short = breakout_quality_masks(frame, config.entry_point_2)
 
     for index in range(length):
         high = highs[index]
@@ -150,6 +152,7 @@ def detect_entry_point_3(context: pd.DataFrame, config: ResearchConfig) -> Entry
                     if (
                         setup.state is SetupState.WAITING_REBREAKOUT
                         and setup.pullback_bars >= config.entry_point_3.pullback_min_bars
+                        and quality_long[index]
                         and close > float(setup.pullback_extreme)
                     ):
                         setup.transition(SetupState.TRIGGERED, index, "close_rebreakout_above_pullback_high")
@@ -180,6 +183,7 @@ def detect_entry_point_3(context: pd.DataFrame, config: ResearchConfig) -> Entry
                     if (
                         setup.state is SetupState.WAITING_REBREAKOUT
                         and setup.pullback_bars >= config.entry_point_3.pullback_min_bars
+                        and quality_short[index]
                         and close < float(setup.pullback_extreme)
                     ):
                         setup.transition(SetupState.TRIGGERED, index, "close_rebreakout_below_pullback_low")
@@ -200,7 +204,8 @@ def detect_entry_point_3(context: pd.DataFrame, config: ResearchConfig) -> Entry
                 )
             else:
                 previous_close = None
-            if active[side] is None and _initial_breakout(
+            quality_ok = quality_long[index] if side is Direction.LONG else quality_short[index]
+            if active[side] is None and quality_ok and _initial_breakout(
                 close,
                 trend_ok,
                 side,

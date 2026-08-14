@@ -17,7 +17,7 @@ timezone = "UTC"
 
 [strategy]
 direction = "both"
-version = "baseline-v1"
+version = "breakout-quality-v1"
 
 [trend]
 ema_fast = 20
@@ -27,6 +27,15 @@ slope_lookback = 5
 [entry_point_2]
 enabled = true
 breakout_lookback = 20
+volume_filter_enabled = true
+volume_multiplier = 1.5
+kline_quality_enabled = true
+min_body_ratio = 0.65
+max_close_extreme_ratio = 0.20
+squeeze_filter_enabled = true
+squeeze_lookback = 50
+squeeze_recent_bars = 5
+squeeze_percentile = 0.30
 
 [entry_point_3]
 enabled = false
@@ -39,6 +48,11 @@ atr_period = 14
 stop_atr = 2.0
 target_atr = 4.0
 max_hold_bars = 80
+structural_stop_enabled = true
+structural_stop_buffer_atr = 0.5
+swing_lookback = 20
+breakeven_enabled = true
+breakeven_trigger_atr = 1.5
 
 [costs]
 spread_model = "fixed"
