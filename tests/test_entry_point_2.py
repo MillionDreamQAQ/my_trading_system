@@ -97,6 +97,29 @@ class EntryPoint2Tests(unittest.TestCase):
         self.assertEqual(signals[0].side, Direction.SHORT)
         self.assertEqual(detect_entry_point_2(context, _config("long")), [])
 
+    def test_subsecond_datetime_columns_preserve_signal_times(self) -> None:
+        context = _context([100, 100, 100, 100, 101.0, 101.2, 100.8])
+        context["medium_source_close_time"] = context["close_time"] - pd.Timedelta("15min")
+        context["large_source_close_time"] = context["close_time"] - pd.Timedelta("30min")
+        for unit in ("us", "ms"):
+            typed_context = context.copy()
+            for column in (
+                "open_time",
+                "close_time",
+                "signal_time",
+                "medium_source_close_time",
+                "large_source_close_time",
+            ):
+                typed_context[column] = pd.array(typed_context[column], dtype=f"datetime64[{unit}, UTC]")
+
+            signals = detect_entry_point_2(typed_context, _config())
+
+            self.assertEqual(len(signals), 1)
+            self.assertEqual(signals[0].signal_time, typed_context.loc[4, "signal_time"])
+            self.assertEqual(signals[0].entry_time, typed_context.loc[5, "open_time"])
+            self.assertEqual(signals[0].medium_source_close_time, typed_context.loc[4, "medium_source_close_time"])
+            self.assertEqual(signals[0].large_source_close_time, typed_context.loc[4, "large_source_close_time"])
+
     def test_same_bar_long_signal_precedes_short_signal(self) -> None:
         context = _context([100, 100, 100, 100, 100])
         context["high"] = 99.0

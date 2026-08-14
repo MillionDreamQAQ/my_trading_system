@@ -69,19 +69,18 @@ class _Position:
     mae: float = 0.0
 
 
-def _datetime_values(series: pd.Series) -> tuple[object, object | None]:
+def _datetime_values(series: pd.Series) -> tuple[object, tuple[str, object] | None]:
     values = series.array
     if isinstance(values, pd.arrays.DatetimeArray):
-        if values.tz is None:
-            return values, None
-        return values.asi8, values.tz
+        return values.asi8, (str(values.dtype.unit), values.tz)
     return values, None
 
 
-def _timestamp_at(values: object, index: int, timezone: object | None) -> pd.Timestamp:
+def _timestamp_at(values: object, index: int, datetime_info: tuple[str, object] | None) -> pd.Timestamp:
     value = values[index]
-    if timezone is not None:
-        return pd.Timestamp(int(value), unit="ns", tz=timezone)
+    if datetime_info is not None:
+        unit, timezone = datetime_info
+        return pd.Timestamp(int(value), unit=unit, tz=timezone)
     return pd.Timestamp(value)
 
 

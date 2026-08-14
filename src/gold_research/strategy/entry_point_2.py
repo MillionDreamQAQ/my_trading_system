@@ -9,30 +9,29 @@ from ..config import ResearchConfig
 from ..domain import Direction, Signal
 
 
-_NAT_NS = np.iinfo(np.int64).min
+_NAT_I8 = np.iinfo(np.int64).min
 
 
-def _datetime_values(series: pd.Series) -> tuple[object, object | None]:
+def _datetime_values(series: pd.Series) -> tuple[object, tuple[str, object] | None]:
     values = series.array
     if isinstance(values, pd.arrays.DatetimeArray):
-        if values.tz is None:
-            return values, None
-        return values.asi8, values.tz
+        return values.asi8, (str(values.dtype.unit), values.tz)
     return values, None
 
 
 def _timestamp_at(
     values: object,
     index: int,
-    timezone: object | None,
+    datetime_info: tuple[str, object] | None,
     *,
     optional: bool = False,
 ) -> pd.Timestamp | None:
     value = values[index]
-    if timezone is not None:
-        if int(value) == _NAT_NS:
+    if datetime_info is not None:
+        unit, timezone = datetime_info
+        if int(value) == _NAT_I8:
             return None if optional else pd.NaT
-        return pd.Timestamp(int(value), unit="ns", tz=timezone)
+        return pd.Timestamp(int(value), unit=unit, tz=timezone)
     if optional and (value is None or pd.isna(value)):
         return None
     return pd.Timestamp(value)

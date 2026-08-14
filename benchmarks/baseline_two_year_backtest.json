@@ -1,0 +1,242 @@
+{
+  "benchmark": {
+    "end": "2026-07-25T00:00:00+00:00",
+    "start": "2024-07-25T00:00:00+00:00"
+  },
+  "data_fingerprint": "ed9bb90195d903db6113d56dc615fa4240c759b6ef1b18398d5926e8135a012c",
+  "scenarios": {
+    "both_ask": {
+      "commission_per_unit": 0.0,
+      "direction": "both",
+      "max_positions": 1,
+      "price_basis": "ask",
+      "price_source": "synthetic_from_mid",
+      "slippage_value": 0.0,
+      "spread_value": 0.0,
+      "summary": {
+        "base_bars": 706795,
+        "context_memory_bytes": 200573628,
+        "context_rows": 706795,
+        "metrics": {
+          "sha256": "647f4778cc0067065071a8d6c2ff9f32fb5fc1aeb32bc5f10fa9f2da3a6eeb5e"
+        },
+        "signal_quality": {
+          "count": 56756,
+          "sha256": "90652cd6a0c57bfe85cadfdd0b73c6b65bde8973c618473467adb7792f665456"
+        },
+        "signals": {
+          "count": 14189,
+          "sha256": "7cfc1ce999c6109cc9391d28394b2fcf5527c47d9a330229936bc2e00340c19b"
+        },
+        "trades": {
+          "count": 7241,
+          "sha256": "47768ad099be92fcb25598b03ecbdcb951857ac610e5ef06fd74c0a81e5bca62"
+        },
+        "unfilled_signals": {
+          "count": 6948,
+          "sha256": "392808cd5f3bc8fa8a835def3d7c0e57096b54aee00037b556c98e032006bf7c"
+        }
+      }
+    },
+    "both_bid": {
+      "commission_per_unit": 0.0,
+      "direction": "both",
+      "max_positions": 1,
+      "price_basis": "bid",
+      "price_source": "synthetic_from_mid",
+      "slippage_value": 0.0,
+      "spread_value": 0.0,
+      "summary": {
+        "base_bars": 706795,
+        "context_memory_bytes": 200573628,
+        "context_rows": 706795,
+        "metrics": {
+          "sha256": "9a6dc3f17f3fcf15152147043736447eafb4a35f1e1cce36227263a73edf64b5"
+        },
+        "signal_quality": {
+          "count": 56756,
+          "sha256": "a7c4d171526efb7462c2931aadab34bac9a94c6856459811392b7e9d74fa7be3"
+        },
+        "signals": {
+          "count": 14189,
+          "sha256": "932c7f14cd52cffbaf7c655bd9767ff6748f76e57b967105bff0dc68db236386"
+        },
+        "trades": {
+          "count": 7241,
+          "sha256": "7f8eb314d9a1423824c0e29a42f274b9d85e9f3f1d44d93ca4c05be56cad41d7"
+        },
+        "unfilled_signals": {
+          "count": 6948,
+          "sha256": "392808cd5f3bc8fa8a835def3d7c0e57096b54aee00037b556c98e032006bf7c"
+        }
+      }
+    },
+    "both_mid": {
+      "commission_per_unit": 0.0,
+      "direction": "both",
+      "max_positions": 1,
+      "price_basis": "mid",
+      "price_source": "cached_mid",
+      "slippage_value": 0.0,
+      "spread_value": 0.0,
+      "summary": {
+        "base_bars": 706795,
+        "context_memory_bytes": 200573628,
+        "context_rows": 706795,
+        "metrics": {
+          "sha256": "58eff866f8affa08978404378cec632eceea51943b6ed9e2ac54e5d21e967e89"
+        },
+        "signal_quality": {
+          "count": 56756,
+          "sha256": "e31b987c7f53779a87a6e2099d2b026156fd7c4c6a3b1698e2993e710445fd4a"
+        },
+        "signals": {
+          "count": 14189,
+          "sha256": "3c2f5a434891476361870a5474a9285cdb8e8d4c987cff65e91ce4ebd5cc494f"
+        },
+        "trades": {
+          "count": 7241,
+          "sha256": "8cf55b091b8593ab282bb1731dc8d0bec50cda64dcecebe47c7a7b42bf563257"
+        },
+        "unfilled_signals": {
+          "count": 6948,
+          "sha256": "392808cd5f3bc8fa8a835def3d7c0e57096b54aee00037b556c98e032006bf7c"
+        }
+      }
+    },
+    "both_mid_costs": {
+      "commission_per_unit": 0.2,
+      "direction": "both",
+      "max_positions": 1,
+      "price_basis": "mid",
+      "price_source": "cached_mid",
+      "slippage_value": 0.1,
+      "spread_value": 0.4,
+      "summary": {
+        "base_bars": 706795,
+        "context_memory_bytes": 200573628,
+        "context_rows": 706795,
+        "metrics": {
+          "sha256": "1af0fdf39e18c66b234870a5d0bb9327fae14c06c1670f5faa26c0066171b25b"
+        },
+        "signal_quality": {
+          "count": 56756,
+          "sha256": "e31b987c7f53779a87a6e2099d2b026156fd7c4c6a3b1698e2993e710445fd4a"
+        },
+        "signals": {
+          "count": 14189,
+          "sha256": "3c2f5a434891476361870a5474a9285cdb8e8d4c987cff65e91ce4ebd5cc494f"
+        },
+        "trades": {
+          "count": 7829,
+          "sha256": "99306f3501d3a521017215542fd271a8ab0e3e48f8ea3c6b45cd3fa044987dab"
+        },
+        "unfilled_signals": {
+          "count": 6360,
+          "sha256": "8b0c19fff71f04b1de77fade2f45716c19b46ed7d20cb53e72295de99e958279"
+        }
+      }
+    },
+    "both_mid_parallel": {
+      "commission_per_unit": 0.0,
+      "direction": "both",
+      "max_positions": 2,
+      "price_basis": "mid",
+      "price_source": "cached_mid",
+      "slippage_value": 0.0,
+      "spread_value": 0.0,
+      "summary": {
+        "base_bars": 706795,
+        "context_memory_bytes": 200573628,
+        "context_rows": 706795,
+        "metrics": {
+          "sha256": "298379f1330ca1ee0befa4860ab1143841e27d3303d00a1a40fdf441e050f8c2"
+        },
+        "signal_quality": {
+          "count": 56756,
+          "sha256": "e31b987c7f53779a87a6e2099d2b026156fd7c4c6a3b1698e2993e710445fd4a"
+        },
+        "signals": {
+          "count": 14189,
+          "sha256": "3c2f5a434891476361870a5474a9285cdb8e8d4c987cff65e91ce4ebd5cc494f"
+        },
+        "trades": {
+          "count": 11310,
+          "sha256": "d539e54805221de3f033b1ed66bffc5c0ea8aecccbd3ff1bd56f92c4e7f12676"
+        },
+        "unfilled_signals": {
+          "count": 2879,
+          "sha256": "1e0c1d256fb433aa40a732dece09b98fe01eb5fc5683d4961e1d4dfa55c83738"
+        }
+      }
+    },
+    "long_mid": {
+      "commission_per_unit": 0.0,
+      "direction": "long",
+      "max_positions": 1,
+      "price_basis": "mid",
+      "price_source": "cached_mid",
+      "slippage_value": 0.0,
+      "spread_value": 0.0,
+      "summary": {
+        "base_bars": 706795,
+        "context_memory_bytes": 200573628,
+        "context_rows": 706795,
+        "metrics": {
+          "sha256": "0ff69d6b5806183fac1eb6717b21cd2b67b0174cd166e0ee2e62671df748bcf4"
+        },
+        "signal_quality": {
+          "count": 36048,
+          "sha256": "06c90ccf35d1ed9568fa5f507b759e65d3dc6dfee0adb56ff9e39ae5d8de4205"
+        },
+        "signals": {
+          "count": 9012,
+          "sha256": "a34782849a680153fbdcfc305f6ebc5ba46f4fec66abc198ffef3912fa2bc32f"
+        },
+        "trades": {
+          "count": 4428,
+          "sha256": "69696710ed6aff655ed855359d266b27add06559b7bb73e1b991e486f78195d6"
+        },
+        "unfilled_signals": {
+          "count": 4584,
+          "sha256": "304fcd76e2dd01275b6c3646afd5b18e821c5338eb7765971a2633294e88967f"
+        }
+      }
+    },
+    "short_mid": {
+      "commission_per_unit": 0.0,
+      "direction": "short",
+      "max_positions": 1,
+      "price_basis": "mid",
+      "price_source": "cached_mid",
+      "slippage_value": 0.0,
+      "spread_value": 0.0,
+      "summary": {
+        "base_bars": 706795,
+        "context_memory_bytes": 200573628,
+        "context_rows": 706795,
+        "metrics": {
+          "sha256": "3fe278f5d0f698164d57de2335b4324344d0bb917fc9349345e2fb3f1906c2a5"
+        },
+        "signal_quality": {
+          "count": 20708,
+          "sha256": "68d49164e584da1275cafb82bb6d01e9d1a5a015f2195ed24952e3faf3fdfc30"
+        },
+        "signals": {
+          "count": 5177,
+          "sha256": "beb0b3215c15731aabde2778d2499e723344d658c49b32d4bf7e41aeb72afa23"
+        },
+        "trades": {
+          "count": 2813,
+          "sha256": "2e8db1d47db9152feeb3bc929fe5fd383bb0c1b8773f933c1bcfef63520945db"
+        },
+        "unfilled_signals": {
+          "count": 2364,
+          "sha256": "247d7cb8978467401ee3da0a794779ee023c78ebb3705d10abfa271a655e0633"
+        }
+      }
+    }
+  },
+  "schema_version": 1,
+  "source_commit": "873e7d26d90ccdba3b7ecbbadbd2cdd66583af0f"
+}

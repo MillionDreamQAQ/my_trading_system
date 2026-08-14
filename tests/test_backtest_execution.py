@@ -231,6 +231,18 @@ class BacktestExecutionTests(unittest.TestCase):
         self.assertEqual(len(result.trades), 2)
         self.assertEqual(len([item for item in result.unfilled_signals if item["reason"] == "position_conflict"]), 1)
 
+    def test_subsecond_datetime_columns_preserve_trade_times(self) -> None:
+        bars = _bars([(100, 100.5, 99.5, 100), (102, 107, 101.5, 106), (102.5, 103, 102, 102.5)])
+        for unit in ("us", "ms"):
+            typed_bars = bars.copy()
+            for column in ("open_time", "close_time"):
+                typed_bars.bars[column] = pd.array(typed_bars.bars[column], dtype=f"datetime64[{unit}, UTC]")
+
+            result = run_backtest(typed_bars, [_signal(0)], _config())
+
+            self.assertEqual(result.trades[0].entry_time, typed_bars.bars.loc[1, "open_time"])
+            self.assertEqual(result.trades[0].exit_time, typed_bars.bars.loc[1, "open_time"])
+
 
 class CostModelTests(unittest.TestCase):
     def test_long_round_trip_uses_ask_then_bid(self) -> None:
