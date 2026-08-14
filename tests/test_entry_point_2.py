@@ -97,6 +97,18 @@ class EntryPoint2Tests(unittest.TestCase):
         self.assertEqual(signals[0].side, Direction.SHORT)
         self.assertEqual(detect_entry_point_2(context, _config("long")), [])
 
+    def test_same_bar_long_signal_precedes_short_signal(self) -> None:
+        context = _context([100, 100, 100, 100, 100])
+        context["high"] = 99.0
+        context["low"] = 101.0
+        context["all_up"] = True
+        context["all_down"] = True
+
+        signals = detect_entry_point_2(context, _config())
+
+        self.assertEqual([signal.side for signal in signals], [Direction.LONG, Direction.SHORT])
+        self.assertEqual(signals[0].signal_time, signals[1].signal_time)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -119,12 +119,16 @@ def evaluate_signal_quality(
 ) -> tuple[dict[str, Any], ...]:
     """Measure fixed future windows separately from executable trades."""
 
+    if not signals:
+        return ()
     bars = series.bars.reset_index(drop=True)
-    close_to_index = {pd.Timestamp(value): index for index, value in enumerate(bars["close_time"])}
+    close_times = pd.Index(bars["close_time"])
+    signal_times = [pd.Timestamp(signal.signal_time) for signal in signals]
+    signal_indices = close_times.get_indexer(signal_times)
     matched_signals = [
-        (signal, index)
-        for signal in signals
-        if (index := close_to_index.get(pd.Timestamp(signal.signal_time))) is not None
+        (signal, int(index), signal.side.value, signal_time.isoformat())
+        for signal, index, signal_time in zip(signals, signal_indices, signal_times)
+        if index >= 0
     ]
     if not matched_signals:
         return ()
@@ -132,14 +136,14 @@ def evaluate_signal_quality(
     price_columns = ("high", "low", "close")
     if not all(column in bars.columns and is_numeric_dtype(bars[column]) for column in price_columns):
         records: list[dict[str, Any]] = []
-        for signal, index in matched_signals:
+        for signal, index, side, signal_time in matched_signals:
             entry_close = float(bars.loc[index, "close"])
             for window in windows:
                 end = index + window
                 if window <= 0 or end >= len(bars):
                     continue
                 future = bars.iloc[index + 1 : end + 1]
-                if signal.side.value == "long":
+                if side == "long":
                     forward_return = float(bars.loc[end, "close"]) / entry_close - 1.0
                     mfe = max(0.0, float(future["high"].max()) / entry_close - 1.0)
                     mae = max(0.0, 1.0 - float(future["low"].min()) / entry_close)
@@ -150,8 +154,8 @@ def evaluate_signal_quality(
                 records.append(
                     {
                         "strategy_id": signal.strategy_id,
-                        "side": signal.side.value,
-                        "signal_time": pd.Timestamp(signal.signal_time).isoformat(),
+                        "side": side,
+                        "signal_time": signal_time,
                         "window_bars": window,
                         "signal_close": entry_close,
                         "forward_return": forward_return,
@@ -162,7 +166,7 @@ def evaluate_signal_quality(
         return tuple(records)
 
     closes = bars["close"].to_numpy(copy=False)
-    matched_indices = np.asarray([index for _, index in matched_signals], dtype=np.intp)
+    matched_indices = np.asarray([index for _, index, _, _ in matched_signals], dtype=np.intp)
     valid_windows = tuple(dict.fromkeys(window for window in windows if 0 < window < len(bars)))
     eligible_indices = {
         window: matched_indices + 1
@@ -191,7 +195,7 @@ def evaluate_signal_quality(
             )
 
     records: list[dict[str, Any]] = []
-    for matched_position, (signal, index) in enumerate(matched_signals):
+    for matched_position, (signal, index, side, signal_time) in enumerate(matched_signals):
         entry_close = float(closes[index])
         for window in windows:
             end = index + window
@@ -199,7 +203,7 @@ def evaluate_signal_quality(
                 continue
             high_max = float(future_highs[window][matched_position])
             low_min = float(future_lows[window][matched_position])
-            if signal.side.value == "long":
+            if side == "long":
                 forward_return = float(closes[end]) / entry_close - 1.0
                 mfe = max(0.0, high_max / entry_close - 1.0)
                 mae = max(0.0, 1.0 - low_min / entry_close)
@@ -210,8 +214,8 @@ def evaluate_signal_quality(
             records.append(
                 {
                     "strategy_id": signal.strategy_id,
-                    "side": signal.side.value,
-                    "signal_time": pd.Timestamp(signal.signal_time).isoformat(),
+                    "side": side,
+                    "signal_time": signal_time,
                     "window_bars": window,
                     "signal_close": entry_close,
                     "forward_return": forward_return,

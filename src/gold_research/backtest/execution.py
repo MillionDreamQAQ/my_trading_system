@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from ..config import ResearchConfig
@@ -68,6 +69,22 @@ class _Position:
     mae: float = 0.0
 
 
+def _datetime_values(series: pd.Series) -> tuple[object, object | None]:
+    values = series.array
+    if isinstance(values, pd.arrays.DatetimeArray):
+        if values.tz is None:
+            return values, None
+        return values.asi8, values.tz
+    return values, None
+
+
+def _timestamp_at(values: object, index: int, timezone: object | None) -> pd.Timestamp:
+    value = values[index]
+    if timezone is not None:
+        return pd.Timestamp(int(value), unit="ns", tz=timezone)
+    return pd.Timestamp(value)
+
+
 def _pnl(side: Direction, entry: float, exit: float, quantity: float) -> float:
     return (exit - entry) * quantity if side is Direction.LONG else (entry - exit) * quantity
 
@@ -86,14 +103,12 @@ def _trigger_quote(open_quote: float, level: float, side: Direction, exit_kind: 
 
 def _trade_from_position(
     position: _Position,
-    bars: pd.DataFrame,
     exit_index: int,
+    exit_time: pd.Timestamp,
     exit_price: float,
     exit_reference_price: float,
     reason: str,
     costs: CostModel,
-    *,
-    exit_at_close: bool = False,
 ) -> Trade:
     side = position.signal.side
     quantity = position.quantity
@@ -110,7 +125,7 @@ def _trade_from_position(
         side=side,
         signal_time=position.signal.signal_time,
         entry_time=position.entry_time,
-        exit_time=pd.Timestamp(bars.iloc[exit_index]["close_time" if exit_at_close else "open_time"]),
+        exit_time=exit_time,
         entry_price=position.entry_price,
         exit_price=exit_price,
         lots=position.lots,
@@ -144,24 +159,44 @@ def run_backtest(
     are retained as unfilled-by-position records rather than silently deleted.
     """
 
-    bars = series.bars.reset_index(drop=True)
+    bars = series.bars
     costs = CostModel(
         spread=config.costs.spread_value,
         slippage=config.costs.slippage_value,
         commission_per_unit=config.costs.commission_per_unit,
         source_basis=config.instrument.price_basis,
     )
-    by_entry: dict[pd.Timestamp, list[Signal]] = {}
-    for signal in signals:
-        if signal.entry_time is not None:
-            by_entry.setdefault(pd.Timestamp(signal.entry_time), []).append(signal)
+    open_time_index = pd.Index(bars["open_time"])
+    entry_indices = np.full(len(signals), -1, dtype=np.intp)
+    pending_entries = [
+        (signal_index, signal)
+        for signal_index, signal in enumerate(signals)
+        if signal.entry_time is not None
+    ]
+    indexed_entries = ()
+    if pending_entries:
+        entry_times = [pd.Timestamp(signal.entry_time) for _, signal in pending_entries]
+        indexed_entries = open_time_index.get_indexer(entry_times)
+        for (signal_index, signal), entry_index in zip(pending_entries, indexed_entries):
+            entry_indices[signal_index] = entry_index
+
+    by_entry: dict[int, list[Signal]] = {}
+    for (_, signal), entry_index in zip(pending_entries, indexed_entries if pending_entries else ()):
+        if entry_index >= 0:
+            by_entry.setdefault(int(entry_index), []).append(signal)
+
+    open_times, open_time_zone = _datetime_values(bars["open_time"])
+    close_times, close_time_zone = _datetime_values(bars["close_time"])
+    opens = bars["open"].to_numpy(copy=False)
+    highs = bars["high"].to_numpy(copy=False)
+    lows = bars["low"].to_numpy(copy=False)
+    closes = bars["close"].to_numpy(copy=False)
     positions: list[_Position] = []
     trades: list[Trade] = []
     unfilled: list[dict[str, object]] = []
 
-    for index, row in enumerate(bars.itertuples(index=False)):
-        open_time = pd.Timestamp(row.open_time)
-        candidates = by_entry.get(open_time, [])
+    for index in range(len(bars)):
+        candidates = by_entry.get(index, [])
         if candidates:
             available_slots = max(config.position.max_positions - len(positions), 0)
             for signal in candidates:
@@ -171,7 +206,7 @@ def run_backtest(
                 if available_slots <= 0:
                     unfilled.append({"signal_time": signal.signal_time.isoformat(), "reason": "position_conflict"})
                     continue
-                mid_open = float(row.open)
+                mid_open = float(opens[index])
                 entry_price = costs.execution_price(mid_open, signal.side, "entry")
                 if signal.side is Direction.LONG:
                     stop = entry_price - config.risk.stop_atr * signal.atr
@@ -183,7 +218,7 @@ def run_backtest(
                 positions.append(_Position(
                     signal,
                     index,
-                    open_time,
+                    _timestamp_at(open_times, index, open_time_zone),
                     mid_open,
                     entry_price,
                     config.instrument.point_value,
@@ -197,12 +232,13 @@ def run_backtest(
 
         if not positions:
             continue
-        high = float(row.high)
-        low = float(row.low)
+        open_value = float(opens[index])
+        high = float(highs[index])
+        low = float(lows[index])
         remaining: list[_Position] = []
         for position in positions:
             side = position.signal.side
-            open_quote = costs.quote_price(float(row.open), side, "exit")
+            open_quote = costs.quote_price(open_value, side, "exit")
             high_quote = costs.quote_price(high, side, "exit")
             low_quote = costs.quote_price(low, side, "exit")
             exit_reason: str | None = None
@@ -229,20 +265,30 @@ def run_backtest(
             if exit_reason is not None and trigger_quote is not None:
                 exit_reference = costs.reference_price(trigger_quote, side, "exit")
                 exit_price = costs.execution_price(exit_reference, side, "exit")
-                trades.append(_trade_from_position(position, bars, index, exit_price, exit_reference, exit_reason, costs))
-                continue
-            if index - position.entry_index >= config.risk.max_hold_bars:
-                exit_price = costs.execution_price(float(row.close), side, "exit")
                 trades.append(
                     _trade_from_position(
                         position,
-                        bars,
                         index,
+                        _timestamp_at(open_times, index, open_time_zone),
                         exit_price,
-                        float(row.close),
+                        exit_reference,
+                        exit_reason,
+                        costs,
+                    )
+                )
+                continue
+            if index - position.entry_index >= config.risk.max_hold_bars:
+                close = float(closes[index])
+                exit_price = costs.execution_price(close, side, "exit")
+                trades.append(
+                    _trade_from_position(
+                        position,
+                        index,
+                        _timestamp_at(close_times, index, close_time_zone),
+                        exit_price,
+                        close,
                         "timeout",
                         costs,
-                        exit_at_close=True,
                     )
                 )
                 continue
@@ -251,26 +297,25 @@ def run_backtest(
 
     if positions and not bars.empty:
         final_index = len(bars) - 1
-        final_row = bars.iloc[final_index]
+        final_close = float(closes[final_index])
+        final_close_time = _timestamp_at(close_times, final_index, close_time_zone)
         for position in positions:
-            exit_price = costs.execution_price(float(final_row["close"]), position.signal.side, "exit")
+            exit_price = costs.execution_price(final_close, position.signal.side, "exit")
             trades.append(
                 _trade_from_position(
                     position,
-                    bars,
                     final_index,
+                    final_close_time,
                     exit_price,
-                    float(final_row["close"]),
+                    final_close,
                     "data_end",
                     costs,
-                    exit_at_close=True,
                 )
             )
-    known_open_times = set(bars["open_time"])
-    for signal in signals:
+    for signal, entry_index in zip(signals, entry_indices):
         if signal.entry_time is None:
             reason = "no_next_bar"
-        elif pd.Timestamp(signal.entry_time) not in known_open_times:
+        elif entry_index < 0:
             reason = "entry_time_not_in_data"
         else:
             # Candidate was either filled or captured as a position conflict.
